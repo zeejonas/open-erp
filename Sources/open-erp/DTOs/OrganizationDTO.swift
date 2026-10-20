@@ -52,14 +52,12 @@ extension PatchOrganizationDTO: Validatable {
 struct CreateCompanyDTO: Content {
     var code: String
     var name: String
-    var organizationId: UUID
 }
 
 extension CreateCompanyDTO: Validatable {
     static func validations(_ validations: inout Validations) {
         validations.add("code", as: String.self, is: !.empty && .count(4...10) && .alphanumeric, customFailureDescription: "code must be 4-10 characters and alphanumeric")
         validations.add("name", as: String.self, is: !.empty && .count(3...255), customFailureDescription: "Name must be 3-255 characters")
-        validations.add("organizationId", as: UUID.self, customFailureDescription: "organizationId must be a UUID")
     }
 }
 
@@ -127,5 +125,17 @@ extension PatchUserDTO: Validatable {
         validations.add("firstName", as: String.self, is: !.empty && .count(1...100), required: false, customFailureDescription: "First name must be 1-100 characters")
         validations.add("lastName", as: String.self, is: !.empty && .count(1...100), required: false, customFailureDescription: "Last name must be 1-100 characters")
         validations.add("email", as: String.self, is: .email && .count(...254), required: false, customFailureDescription: "Email must be a valid email address")
+    }
+}
+
+// MARK: - OrganizationUser DTOs
+
+struct CreateOrganizationUserDTO: Content {
+    var userId: UUID
+}
+
+extension CreateOrganizationUserDTO: Validatable {
+    static func validations(_ validations: inout Validations) {
+        validations.add("userId", as: UUID.self, customFailureDescription: "userId must be a UUID")
     }
 }

@@ -23,9 +23,9 @@ final class Organization: Model, @unchecked Sendable {
     @OptionalParent(key: "updated_by") var updatedBy: User?
     @OptionalParent(key: "deleted_by") var deletedBy: User?
 
-    @Timestamp(key: "created_at", on: .create, format: .iso8601) var createdAt: Date?
-    @Timestamp(key: "updated_at", on: .update, format: .iso8601) var updatedAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete, format: .iso8601) var deletedAt: Date?
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init () {}
 
@@ -78,9 +78,9 @@ final class Company: Model, @unchecked Sendable {
     @OptionalParent(key: "updated_by") var updatedBy: User?
     @OptionalParent(key: "deleted_by") var deletedBy: User?
 
-    @Timestamp(key: "created_at", on: .create, format: .iso8601) var createdAt: Date?
-    @Timestamp(key: "updated_at", on: .update, format: .iso8601) var updatedAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete, format: .iso8601) var deletedAt: Date?
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 
@@ -96,8 +96,7 @@ final class Company: Model, @unchecked Sendable {
     func toCreateDTO() -> CreateCompanyDTO {
         .init(
             code: self.code,
-            name: self.name,
-            organizationId: self.$organization.id
+            name: self.name
         )
     }
 
@@ -114,6 +113,10 @@ final class Company: Model, @unchecked Sendable {
             updatedAt: self.updatedAt,
             deletedAt: self.deletedAt,
         )
+    }
+
+    static func query(on db: any Database, organizationID: UUID) -> QueryBuilder<Company> {
+        query(on: db).filter(\.$organization.$id == organizationID)
     }
 }
 
@@ -142,9 +145,9 @@ final class User: Model, @unchecked Sendable {
     @OptionalParent(key: "updated_by") var updatedBy: User?
     @OptionalParent(key: "deleted_by") var deletedBy: User?
 
-    @Timestamp(key: "created_at", on: .create, format: .iso8601) var createdAt: Date?
-    @Timestamp(key: "updated_at", on: .update, format: .iso8601) var updatedAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete, format: .iso8601) var deletedAt: Date?
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 
@@ -179,6 +182,13 @@ final class User: Model, @unchecked Sendable {
             deletedAt: self.deletedAt,
         )
     }
+
+    static func query(on db: any Database, organizationID: UUID) -> QueryBuilder<User> {
+        query(on: db)
+            .join(OrganizationUser.self, on: \User.$id == \OrganizationUser.$user.$id)
+            .filter(OrganizationUser.self, \.$organization.$id == organizationID)
+            .filter(OrganizationUser.self, \.$deletedAt == nil)
+    }
 }
 
 final class OrganizationUser: Model, @unchecked Sendable {
@@ -196,8 +206,8 @@ final class OrganizationUser: Model, @unchecked Sendable {
     @OptionalParent(key: "created_by") var createdBy: User?
     @OptionalParent(key: "deleted_by") var deletedBy: User?
 
-    @Timestamp(key: "created_at", on: .create, format: .iso8601) var createdAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete, format: .iso8601) var deletedAt: Date?
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 
@@ -206,6 +216,10 @@ final class OrganizationUser: Model, @unchecked Sendable {
         self.$user.id = userID
         self.$createdBy.id = createdByID
         self.$deletedBy.id = deletedByID
+    }
+
+    static func query(on db: any Database, organizationID: UUID) -> QueryBuilder<OrganizationUser> {
+        query(on: db).filter(\.$organization.$id == organizationID)
     }
 }
 
@@ -224,8 +238,8 @@ final class CompanyUser: Model, @unchecked Sendable {
     @OptionalParent(key: "created_by") var createdBy: User?
     @OptionalParent(key: "deleted_by") var deletedBy: User?
 
-    @Timestamp(key: "created_at", on: .create, format: .iso8601) var createdAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete, format: .iso8601) var deletedAt: Date?
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 

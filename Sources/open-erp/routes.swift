@@ -11,4 +11,8 @@ func routes(_ app: Application) throws {
     }
 
     try app.register(collection: TodoController())
+    try app.register(collection: OrganizationController())
+    try app.register(collection: CompanyController())
+    try app.register(collection: UserController())
+    try app.register(collection: OrganizationUserController())
 }
