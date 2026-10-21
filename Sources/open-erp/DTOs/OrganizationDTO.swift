@@ -87,20 +87,6 @@ extension PatchCompanyDTO: Validatable {
 }
 
 // MARK: - User DTOs
-struct CreateUserDTO: Content {
-    var firstName: String
-    var lastName: String
-    var email: String
-}
-
-extension CreateUserDTO: Validatable {
-    static func validations(_ validations: inout Validations) {
-        validations.add("firstName", as: String.self, is: !.empty && .count(1...100), customFailureDescription: "First name must be 1-100 characters")
-        validations.add("lastName", as: String.self, is: !.empty && .count(1...100), customFailureDescription: "Last name must be 1-100 characters")
-        validations.add("email", as: String.self, is: .email && .count(...254), customFailureDescription: "Email must be a valid email address")
-    }
-}
-
 struct GetUserDTO: Content {
     var id: UUID?
     var firstName: String
@@ -114,28 +100,3 @@ struct GetUserDTO: Content {
     var deletedAt: Date?
 }
 
-struct PatchUserDTO: Content {
-    var firstName: String?
-    var lastName: String?
-    var email: String?
-}
-
-extension PatchUserDTO: Validatable {
-    static func validations(_ validations: inout Validations) {
-        validations.add("firstName", as: String.self, is: !.empty && .count(1...100), required: false, customFailureDescription: "First name must be 1-100 characters")
-        validations.add("lastName", as: String.self, is: !.empty && .count(1...100), required: false, customFailureDescription: "Last name must be 1-100 characters")
-        validations.add("email", as: String.self, is: .email && .count(...254), required: false, customFailureDescription: "Email must be a valid email address")
-    }
-}
-
-// MARK: - OrganizationUser DTOs
-
-struct CreateOrganizationUserDTO: Content {
-    var userId: UUID
-}
-
-extension CreateOrganizationUserDTO: Validatable {
-    static func validations(_ validations: inout Validations) {
-        validations.add("userId", as: UUID.self, customFailureDescription: "userId must be a UUID")
-    }
-}

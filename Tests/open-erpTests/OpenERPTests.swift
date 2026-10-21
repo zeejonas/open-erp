@@ -1,121 +1,48 @@
 @testable import open_erp
-import VaporTesting
-import Testing
 import Fluent
+import Testing
+import VaporTesting
 
 @Suite("App Tests with DB", .serialized)
 struct OpenERPTests {
-    private func withApp(_ test: (Application) async throws -> ()) async throws {
-        let app = try await Application.make(.testing)
-        do {
-            try await configure(app)
-            try await app.autoMigrate()
-            try await test(app)
-            try await app.autoRevert()
-        } catch {
-            try? await app.autoRevert()
-            try await app.asyncShutdown()
-            throw error
-        }
-        try await app.asyncShutdown()
-    }
-
-    private func createOrganization(
-        on db: any Database,
-        code: String,
-        name: String
-    ) async throws -> Organization {
-        let organization = Organization(
-            code: code,
-            name: name,
-            createdBy: nil,
-            updatedBy: nil,
-            deletedBy: nil
-        )
-        try await organization.save(on: db)
-        return organization
-    }
-
-    private func createUser(
-        on db: any Database,
-        firstName: String,
-        lastName: String,
-        email: String
-    ) async throws -> User {
-        let user = User(
-            firstName: firstName,
-            lastName: lastName,
-            email: email,
-            createdBy: nil,
-            updatedBy: nil,
-            deletedBy: nil
-        )
-        try await user.save(on: db)
-        return user
-    }
-
-    private func withOrgHeader(_ organizationID: UUID) -> (inout TestingHTTPRequest) -> Void {
-        { req in
-            req.headers.replaceOrAdd(
-                name: OrganizationMiddleware.headerName,
-                value: organizationID.uuidString
-            )
-        }
-    }
-
-    // MARK: - Organization middleware
-
-    @Test("Missing organization header returns 400")
-    func missingOrganizationHeader() async throws {
-        try await withApp { app in
-            try await app.testing().test(.GET, "companies", afterResponse: { res async in
-                #expect(res.status == .badRequest)
-            })
-        }
-    }
-
-    @Test("Malformed organization header returns 400")
-    func malformedOrganizationHeader() async throws {
-        try await withApp { app in
-            try await app.testing().test(.GET, "companies", beforeRequest: { req in
-                req.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: "not-a-uuid")
-            }, afterResponse: { res async in
-                #expect(res.status == .badRequest)
-            })
-        }
-    }
-
-    @Test("Unknown organization header returns 404")
-    func unknownOrganizationHeader() async throws {
-        try await withApp { app in
-            try await app.testing().test(.GET, "companies", beforeRequest: { req in
-                req.headers.replaceOrAdd(
-                    name: OrganizationMiddleware.headerName,
-                    value: UUID().uuidString
-                )
-            }, afterResponse: { res async in
-                #expect(res.status == .notFound)
-            })
-        }
-    }
-
-    // MARK: - Company tenant isolation
-
-    @Test("POST /companies assigns organization from header")
+    @Test("POST /companies assigns organization from header and records created_by")
     func createCompanyUsesHeaderOrganization() async throws {
         try await withApp { app in
             let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
             let orgID = try org.requireID()
+            let user = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "ada@example.com",
+                subject: "ada",
+                permissions: Permission.allCases
+            )
+            let userID = try user.requireID()
+            let token = try await signAccessToken(on: app, subject: "ada")
 
+            var createdCompanyID: UUID?
             try await app.testing().test(.POST, "companies", beforeRequest: { req in
-                req.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: orgID.uuidString)
+                authorize(&req, token: token, organizationID: orgID)
                 try req.content.encode(CreateCompanyDTO(code: "COMPA", name: "Company A"))
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 let dto = try res.content.decode(GetCompanyDTO.self)
                 #expect(dto.code == "COMPA")
                 #expect(dto.organizationId == orgID)
+                #expect(dto.createdById == userID)
+                createdCompanyID = dto.id
             })
+
+            let companyID = try #require(createdCompanyID)
+            try await app.testing().test(.DELETE, "companies/\(companyID)", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .noContent)
+            })
+
+            let deleted = try await Company.query(on: app.db).withDeleted().filter(\.$id == companyID).first()
+            #expect(deleted?.deletedAt != nil)
+            #expect(deleted?.$deletedBy.id == userID)
         }
     }
 
@@ -126,6 +53,14 @@ struct OpenERPTests {
             let orgB = try await createOrganization(on: app.db, code: "ORGB", name: "Org B")
             let orgAID = try orgA.requireID()
             let orgBID = try orgB.requireID()
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgBID,
+                email: "bea@example.com",
+                subject: "bea",
+                permissions: Permission.allCases
+            )
+            let token = try await signAccessToken(on: app, subject: "bea")
 
             let company = Company(
                 code: "COMPA",
@@ -138,36 +73,39 @@ struct OpenERPTests {
             try await company.save(on: app.db)
             let companyID = try company.requireID()
 
-            try await app.testing().test(.GET, "companies", beforeRequest: withOrgHeader(orgBID), afterResponse: { res async throws in
+            try await app.testing().test(.GET, "companies", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgBID)
+            }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 let companies = try res.content.decode([GetCompanyDTO].self)
                 #expect(companies.isEmpty)
             })
 
-            try await app.testing().test(.GET, "companies/\(companyID)", beforeRequest: withOrgHeader(orgBID), afterResponse: { res async in
+            try await app.testing().test(.GET, "companies/\(companyID)", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgBID)
+            }, afterResponse: { res async in
                 #expect(res.status == .notFound)
             })
 
             try await app.testing().test(.PATCH, "companies/\(companyID)", beforeRequest: { req in
-                req.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: orgBID.uuidString)
+                authorize(&req, token: token, organizationID: orgBID)
                 try req.content.encode(PatchCompanyDTO(code: nil, name: "Hijacked"))
             }, afterResponse: { res async in
                 #expect(res.status == .notFound)
             })
 
-            try await app.testing().test(.DELETE, "companies/\(companyID)", beforeRequest: withOrgHeader(orgBID), afterResponse: { res async in
+            try await app.testing().test(.DELETE, "companies/\(companyID)", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgBID)
+            }, afterResponse: { res async in
                 #expect(res.status == .notFound)
             })
 
             let stillThere = try await Company.query(on: app.db, organizationID: orgAID)
                 .filter(\.$id == companyID)
                 .first()
-            #expect(stillThere != nil)
             #expect(stillThere?.name == "Company A")
         }
     }
-
-    // MARK: - Users and organization links
 
     @Test("GET /users returns only users linked to the organization")
     func usersScopedToOrganization() async throws {
@@ -176,72 +114,122 @@ struct OpenERPTests {
             let orgB = try await createOrganization(on: app.db, code: "ORGB", name: "Org B")
             let orgAID = try orgA.requireID()
             let orgBID = try orgB.requireID()
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgAID,
+                email: "ann@example.com",
+                subject: "ann",
+                permissions: [.organizationUserRead],
+                firstName: "Ann",
+                lastName: "A"
+            )
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgBID,
+                email: "bob@example.com",
+                subject: "bob",
+                permissions: [.organizationUserRead],
+                firstName: "Bob",
+                lastName: "B"
+            )
+            let token = try await signAccessToken(on: app, subject: "ann")
 
-            let userA = try await createUser(on: app.db, firstName: "Ann", lastName: "A", email: "ann@example.com")
-            let userB = try await createUser(on: app.db, firstName: "Bob", lastName: "B", email: "bob@example.com")
-            let userAID = try userA.requireID()
-            let userBID = try userB.requireID()
-
-            try await OrganizationUser(organizationID: orgAID, userID: userAID).save(on: app.db)
-            try await OrganizationUser(organizationID: orgBID, userID: userBID).save(on: app.db)
-
-            try await app.testing().test(.GET, "users", beforeRequest: withOrgHeader(orgAID), afterResponse: { res async throws in
+            try await app.testing().test(.GET, "users", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgAID)
+            }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 let users = try res.content.decode([GetUserDTO].self)
-                #expect(users.count == 1)
-                #expect(users[0].email == "ann@example.com")
+                #expect(users.map(\.email) == ["ann@example.com"])
             })
         }
     }
 
-    @Test("Deleting organization-user link hides user from org")
+    @Test("Deleting an organization-user link hides that user and records deleted_by")
     func deleteOrganizationUserHidesUser() async throws {
         try await withApp { app in
             let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
             let orgID = try org.requireID()
-            let user = try await createUser(on: app.db, firstName: "Ann", lastName: "A", email: "ann@example.com")
-            let userID = try user.requireID()
-
-            try await OrganizationUser(organizationID: orgID, userID: userID).save(on: app.db)
-
-            try await app.testing().test(
-                .DELETE,
-                "organization-users/\(userID)",
-                beforeRequest: withOrgHeader(orgID),
-                afterResponse: { res async in
-                    #expect(res.status == .noContent)
-                }
+            let admin = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "admin@example.com",
+                subject: "admin",
+                permissions: [.organizationUserRead, .organizationUserDelete, .organizationInvitationCreate]
             )
+            let other = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "ann@example.com",
+                subject: "ann",
+                permissions: [.companyRead],
+                firstName: "Ann",
+                lastName: "A"
+            )
+            let adminID = try admin.requireID()
+            let otherID = try other.requireID()
+            let adminToken = try await signAccessToken(on: app, subject: "admin")
+            let annToken = try await signAccessToken(on: app, subject: "ann")
 
-            try await app.testing().test(.GET, "users", beforeRequest: withOrgHeader(orgID), afterResponse: { res async throws in
+            try await app.testing().test(.DELETE, "organization-users/\(otherID)", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .noContent)
+            })
+
+            let membership = try await OrganizationUser.query(on: app.db, organizationID: orgID)
+                .filter(\.$user.$id == otherID)
+                .withDeleted()
+                .first()
+            #expect(membership?.deletedAt != nil)
+            #expect(membership?.$deletedBy.id == adminID)
+
+            try await app.testing().test(.GET, "users", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgID)
+            }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 let users = try res.content.decode([GetUserDTO].self)
-                #expect(users.isEmpty)
+                #expect(users.map(\.email) == ["admin@example.com"])
             })
-        }
-    }
 
-    @Test("Duplicate organization-user link returns 409")
-    func duplicateOrganizationUserReturnsConflict() async throws {
-        try await withApp { app in
-            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
-            let orgID = try org.requireID()
-            let user = try await createUser(on: app.db, firstName: "Ann", lastName: "A", email: "ann@example.com")
-            let userID = try user.requireID()
-
-            try await app.testing().test(.POST, "organization-users", beforeRequest: { req in
-                req.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: orgID.uuidString)
-                try req.content.encode(CreateOrganizationUserDTO(userId: userID))
+            try await app.testing().test(.GET, "companies", beforeRequest: { req in
+                authorize(&req, token: annToken, organizationID: orgID)
             }, afterResponse: { res async in
-                #expect(res.status == .created)
+                #expect(res.status == .forbidden)
             })
 
-            try await app.testing().test(.POST, "organization-users", beforeRequest: { req in
-                req.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: orgID.uuidString)
-                try req.content.encode(CreateOrganizationUserDTO(userId: userID))
-            }, afterResponse: { res async in
-                #expect(res.status == .conflict)
+            let revoked = try await OrganizationRoleAssignment.query(on: app.db)
+                .filter(\.$organizationUser.$id == membership!.requireID())
+                .withDeleted()
+                .first()
+            #expect(revoked?.deletedAt != nil)
+            #expect(revoked?.$deletedBy.id == adminID)
+
+            var inviteToken = ""
+            try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgID)
+                try req.content.encode(CreateInvitationDTO(email: "ann@example.com", firstName: "Ann", lastName: "A", roleId: nil))
+            }, afterResponse: { res async throws in
+                inviteToken = try res.content.decode(CreateInvitationResponse.self).token
             })
+            stubUserInfo(app, email: "ann@example.com", emailVerified: true)
+            try await app.testing().test(.POST, "invitations/accept", beforeRequest: { req in
+                authorize(&req, token: annToken)
+                try req.content.encode(AcceptInvitationDTO(token: inviteToken))
+            }, afterResponse: { res async in
+                #expect(res.status == .ok)
+            })
+
+            try await app.testing().test(.GET, "companies", beforeRequest: { req in
+                authorize(&req, token: annToken, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .forbidden, "Re-joining must not restore revoked roles")
+            })
+            let memberships = try await OrganizationUser.query(on: app.db, organizationID: orgID)
+                .filter(\.$user.$id == otherID)
+                .withDeleted()
+                .all()
+            #expect(memberships.count == 2)
+            #expect(memberships.contains { $0.$deletedBy.id == adminID })
         }
     }
 }

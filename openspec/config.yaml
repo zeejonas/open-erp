@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  open-erp: open-source, multi-tenant ERP back end ("Enterprise software without the robbery").
+  Stack: Swift 6, Vapor 4, Fluent, Postgres, vapor/jwt (OIDC, provider-agnostic; Auth0 default).
+  Tenancy: organization selected by X-Organization-ID, authorized by membership; companies belong to organizations.
+  Access: zero-trust RBAC via explicit permissions; soft deletes; audit attribution on every write.
+  Compliance: design for SOX and SOC controls.
+  Principles: simplest readable code, minimal bloat, no tests for the sake of testing.
+  Ground decisions in current Vapor docs (docs.vapor.codes, api.vapor.codes) or a demo.
+
+rules:
+  proposal:
+    - Keep it short; include Non-goals
+    - Call out SOX/SOC impact (access control, audit trail, segregation of duties)
+  design:
+    - Cite Vapor/Fluent docs for each framework decision
+    - List rejected alternatives in one line each
+  specs:
+    - Cover tenant isolation and authorization failures as scenarios
+  tasks:
+    - Small, verifiable steps; pair each behavior change with a test

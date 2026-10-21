@@ -17,12 +17,21 @@ func configure(_ app: Application) async throws {
         tls: .prefer(try .init(configuration: .clientDefault)))
     ), as: .psql)
 
-    app.migrations.add(CreateTodo())
     app.migrations.add(CreateUser())
     app.migrations.add(CreateOrganization())
     app.migrations.add(CreateCompany())
     app.migrations.add(CreateOrganizationUser())
     app.migrations.add(CreateCompanyUser())
+    app.migrations.add(AddUserAuthFields())
+    app.migrations.add(ScopeOrganizationUserUniquenessToActiveRows())
+    app.migrations.add(CreateRole())
+    app.migrations.add(CreateRolePermission())
+    app.migrations.add(CreateOrganizationRoleAssignment())
+    app.migrations.add(CreateCompanyRoleAssignment())
+    app.migrations.add(CreateOrganizationInvitation())
+
+    try await configureAuthentication(app)
+    app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
 
     // register routes
     try routes(app)

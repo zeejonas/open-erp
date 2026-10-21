@@ -3,7 +3,7 @@ import Vapor
 
 struct CompanyController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
-        let companies = routes.grouped(OrganizationMiddleware()).grouped("companies")
+        let companies = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("companies")
 
         companies.get(use: self.index)
         companies.post(use: self.create)
@@ -16,13 +16,15 @@ struct CompanyController: RouteCollection {
 
     @Sendable
     func index(req: Request) async throws -> [GetCompanyDTO] {
-        try await Company.query(on: req.db, organizationID: req.organizationID)
+        try req.require(.companyRead)
+        return try await Company.query(on: req.db, organizationID: req.organizationID)
             .all()
             .map { $0.toGetDTO() }
     }
 
     @Sendable
     func create(req: Request) async throws -> GetCompanyDTO {
+        try req.require(.companyCreate)
         try CreateCompanyDTO.validate(content: req)
         let dto = try req.content.decode(CreateCompanyDTO.self)
 
@@ -30,22 +32,26 @@ struct CompanyController: RouteCollection {
             code: dto.code,
             name: dto.name,
             organizationID: req.organizationID,
-            createdBy: nil,
+            createdBy: req.user,
             updatedBy: nil,
             deletedBy: nil
         )
-        try await company.save(on: req.db)
+        try await conflictOnDuplicate(Self.duplicateCode) {
+            try await company.save(on: req.db)
+        }
         return company.toGetDTO()
     }
 
     @Sendable
     func show(req: Request) async throws -> GetCompanyDTO {
+        try req.require(.companyRead)
         let company = try await self.findCompany(req: req)
         return company.toGetDTO()
     }
 
     @Sendable
     func patch(req: Request) async throws -> GetCompanyDTO {
+        try req.require(.companyUpdate)
         try PatchCompanyDTO.validate(content: req)
         let dto = try req.content.decode(PatchCompanyDTO.self)
         let company = try await self.findCompany(req: req)
@@ -56,17 +62,23 @@ struct CompanyController: RouteCollection {
         if let name = dto.name {
             company.name = name
         }
+        company.$updatedBy.id = try req.userID()
 
-        try await company.update(on: req.db)
+        try await conflictOnDuplicate(Self.duplicateCode) {
+            try await company.update(on: req.db)
+        }
         return company.toGetDTO()
     }
 
     @Sendable
     func delete(req: Request) async throws -> HTTPStatus {
+        try req.require(.companyDelete)
         let company = try await self.findCompany(req: req)
-        try await company.delete(on: req.db)
+        try await company.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
         return .noContent
     }
+
+    private static let duplicateCode = "A company with this code already exists"
 
     private func findCompany(req: Request) async throws -> Company {
         guard let companyID = req.parameters.get("companyID", as: UUID.self) else {

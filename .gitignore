@@ -13,3 +13,6 @@ default.profraw
 
 
 .vscode
+.claude
+.codex
+.cursor

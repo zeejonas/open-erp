@@ -1,4 +1,5 @@
 import Fluent
+import FluentSQL
 import Vapor
 
 final class Organization: Model, @unchecked Sendable {
@@ -135,6 +136,12 @@ final class User: Model, @unchecked Sendable {
     @Field(key: "email")
     var email: String
 
+    @OptionalField(key: "auth_subject")
+    var authSubject: String?
+
+    @Field(key: "is_platform_admin")
+    var isPlatformAdmin: Bool
+
     @Siblings(through: OrganizationUser.self, from: \.$user, to: \.$organization)
     var organizations: [Organization]
 
@@ -151,21 +158,24 @@ final class User: Model, @unchecked Sendable {
 
     init() {}
 
-    init(firstName: String, lastName: String, email: String, createdBy: User?, updatedBy: User?, deletedBy: User?) {
+    init(
+        firstName: String,
+        lastName: String,
+        email: String,
+        authSubject: String? = nil,
+        isPlatformAdmin: Bool = false,
+        createdBy: User? = nil,
+        updatedBy: User? = nil,
+        deletedBy: User? = nil
+    ) {
         self.firstName = firstName
         self.lastName = lastName
         self.email = email
+        self.authSubject = authSubject
+        self.isPlatformAdmin = isPlatformAdmin
         self.$createdBy.id = createdBy?.id
         self.$updatedBy.id = updatedBy?.id
         self.$deletedBy.id = deletedBy?.id
-    }
-
-    func toCreateDTO() -> CreateUserDTO {
-        .init(
-            firstName: self.firstName,
-            lastName: self.lastName,
-            email: self.email
-        )
     }
 
     func toGetDTO() -> GetUserDTO {
@@ -188,6 +198,12 @@ final class User: Model, @unchecked Sendable {
             .join(OrganizationUser.self, on: \User.$id == \OrganizationUser.$user.$id)
             .filter(OrganizationUser.self, \.$organization.$id == organizationID)
             .filter(OrganizationUser.self, \.$deletedAt == nil)
+    }
+
+    static func find(email: String, on db: any Database) async throws -> User? {
+        try await User.query(on: db)
+            .filter(.sql(embed: "LOWER(\(ident: "email")) = \(bind: email.lowercased())"))
+            .first()
     }
 }
 
