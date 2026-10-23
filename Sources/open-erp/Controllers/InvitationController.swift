@@ -35,11 +35,18 @@ struct InvitationController: RouteCollection {
     }
 
     @Sendable
-    func index(req: Request) async throws -> [GetInvitationDTO] {
+    func index(req: Request) async throws -> Page<GetInvitationDTO> {
         try req.require(.organizationInvitationRead)
-        return try await OrganizationInvitation.pending(on: req.db)
+        let (filters, page) = try req.listParameters(InvitationListFilters.self)
+        var invitations = OrganizationInvitation.pending(on: req.db)
             .filter(\.$organization.$id == req.organizationID)
-            .all()
+            .filter(\.$email, contains: filters.email)
+        if let groupID = filters.groupId {
+            invitations = invitations.filter(\.$group.$id == groupID)
+        }
+        return try await invitations
+            .newestFirst(\.$createdAt)
+            .paginate(page)
             .map { $0.toGetDTO() }
     }
 

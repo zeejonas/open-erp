@@ -11,10 +11,24 @@ struct UserController: RouteCollection {
     }
 
     @Sendable
-    func index(req: Request) async throws -> [GetUserDTO] {
+    func index(req: Request) async throws -> Page<GetUserDTO> {
         try req.require(.organizationUserRead)
-        return try await User.query(on: req.db, organizationID: req.organizationID)
-            .all()
+        let (filters, page) = try req.listParameters(UserListFilters.self)
+        var users = User.query(on: req.db, organizationID: req.organizationID)
+            .filter(\.$firstName, contains: filters.firstName)
+            .filter(\.$lastName, contains: filters.lastName)
+            .filter(\.$email, contains: filters.email)
+        if let groupID = filters.groupId {
+            users = users
+                .join(GroupMember.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
+                .join(AccessGroup.self, on: \GroupMember.$group.$id == \AccessGroup.$id)
+                .filter(GroupMember.self, \.$group.$id == groupID)
+                .filter(GroupMember.self, \.$deletedAt == nil)
+                .filter(AccessGroup.self, \.$deletedAt == nil)
+        }
+        return try await users
+            .newestFirst(\.$updatedAt)
+            .paginate(page)
             .map { $0.toGetDTO() }
     }
 

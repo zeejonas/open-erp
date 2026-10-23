@@ -19,5 +19,6 @@ rules:
     - List rejected alternatives in one line each
   specs:
     - Cover tenant isolation and authorization failures as scenarios
+    - Collection endpoints follow the list-endpoints spec: declare filters and the order timestamp.
   tasks:
     - Small, verifiable steps; pair each behavior change with a test

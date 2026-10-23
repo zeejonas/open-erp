@@ -170,8 +170,8 @@ extension OpenERPTests {
                 authorize(&req, token: token)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let organizations = try res.content.decode([GetOrganizationDTO].self)
-                #expect(Set(organizations.compactMap(\.id)) == [orgAID, orgBID])
+                let organizations = try res.content.decode(Page<GetOrganizationDTO>.self)
+                #expect(Set(organizations.items.compactMap(\.id)) == [orgAID, orgBID])
             })
         }
     }

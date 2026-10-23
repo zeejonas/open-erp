@@ -15,10 +15,14 @@ struct CompanyController: RouteCollection {
     }
 
     @Sendable
-    func index(req: Request) async throws -> [GetCompanyDTO] {
+    func index(req: Request) async throws -> Page<GetCompanyDTO> {
         try req.require(.companyRead)
+        let (filters, page) = try req.listParameters(CompanyListFilters.self)
         return try await Company.query(on: req.db, organizationID: req.organizationID)
-            .all()
+            .filter(\.$code, contains: filters.code)
+            .filter(\.$name, contains: filters.name)
+            .newestFirst(\.$updatedAt)
+            .paginate(page)
             .map { $0.toGetDTO() }
     }
 

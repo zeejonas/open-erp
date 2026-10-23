@@ -90,8 +90,8 @@ struct OpenERPTests {
                 authorize(&req, token: token, organizationID: orgBID)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let companies = try res.content.decode([GetCompanyDTO].self)
-                #expect(companies.isEmpty)
+                let companies = try res.content.decode(Page<GetCompanyDTO>.self)
+                #expect(companies.items.isEmpty)
             })
 
             try await app.testing().test(.GET, "companies/\(companyID)", beforeRequest: { req in
@@ -151,8 +151,8 @@ struct OpenERPTests {
                 authorize(&req, token: token, organizationID: orgAID)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let users = try res.content.decode([GetUserDTO].self)
-                #expect(users.map(\.email) == ["ann@example.com"])
+                let users = try res.content.decode(Page<GetUserDTO>.self)
+                #expect(users.items.map(\.email) == ["ann@example.com"])
             })
         }
     }
@@ -200,8 +200,8 @@ struct OpenERPTests {
                 authorize(&req, token: adminToken, organizationID: orgID)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let users = try res.content.decode([GetUserDTO].self)
-                #expect(users.map(\.email) == ["admin@example.com"])
+                let users = try res.content.decode(Page<GetUserDTO>.self)
+                #expect(users.items.map(\.email) == ["admin@example.com"])
             })
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in

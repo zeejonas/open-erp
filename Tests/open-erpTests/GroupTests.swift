@@ -326,8 +326,8 @@ extension OpenERPTests {
                 authorize(&req, token: adminToken, organizationID: orgID)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let members = try res.content.decode([GetGroupMemberDTO].self)
-                #expect(members.map(\.userId) == [clerkID])
+                let members = try res.content.decode(Page<GetGroupMemberDTO>.self)
+                #expect(members.items.map(\.userId) == [clerkID])
             })
             try await app.testing().test(.POST, "groups/\(group)/members", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgID)
@@ -479,8 +479,8 @@ extension OpenERPTests {
             try await app.testing().test(.GET, "groups", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
             }, afterResponse: { res async throws in
-                let listed = try res.content.decode([GetGroupDTO].self)
-                let clerks = try #require(listed.first { $0.name == "AP Clerks" })
+                let listed = try res.content.decode(Page<GetGroupDTO>.self)
+                let clerks = try #require(listed.items.first { $0.name == "AP Clerks" })
                 #expect(clerks.companyIds == [company])
             })
             try await app.testing().test(.POST, "groups/\(group)/companies", beforeRequest: { req in

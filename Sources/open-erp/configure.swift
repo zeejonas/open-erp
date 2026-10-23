@@ -17,6 +17,9 @@ func configure(_ app: Application) async throws {
         tls: .prefer(try .init(configuration: .clientDefault)))
     ), as: .psql)
 
+    // Fluent clamps an oversized page. Handlers reject it first; this limit is the backstop.
+    app.fluent.pagination.pageSizeLimit = 100
+
     app.migrations.add(CreateUser())
     app.migrations.add(CreateOrganization())
     app.migrations.add(CreateCompany())

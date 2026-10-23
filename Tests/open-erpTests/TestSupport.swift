@@ -2,6 +2,7 @@
 import Crypto
 import Fluent
 import JWT
+import Testing
 import VaporTesting
 
 @discardableResult
@@ -136,6 +137,31 @@ func authorize(_ request: inout TestingHTTPRequest, token: String, organizationI
     if let organizationID {
         request.headers.replaceOrAdd(name: OrganizationMiddleware.headerName, value: organizationID.uuidString)
     }
+}
+
+func authorizedGet(
+    _ app: Application,
+    _ path: String,
+    query: String? = nil,
+    token: String,
+    organizationID: UUID? = nil,
+    _ check: @escaping (TestingHTTPResponse) async throws -> Void
+) async throws {
+    try await app.testing().test(.GET, path, beforeRequest: { req in
+        authorize(&req, token: token, organizationID: organizationID)
+        if let query {
+            req.url.query = query
+        }
+    }, afterResponse: check)
+}
+
+func expectBadRequest(_ response: TestingHTTPResponse, naming parameter: String) throws {
+    #expect(response.status == .badRequest)
+    struct ErrorBody: Content {
+        var reason: String
+    }
+    let body = try response.content.decode(ErrorBody.self)
+    #expect(body.reason.contains(parameter), "\(body.reason) should name \(parameter)")
 }
 
 func stubUserInfo(_ app: Application, email: String, emailVerified: Bool) {

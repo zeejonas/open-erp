@@ -36,11 +36,18 @@ struct RoleController: RouteCollection {
     }
 
     @Sendable
-    func index(req: Request) async throws -> [GetRoleDTO] {
+    func index(req: Request) async throws -> Page<GetRoleDTO> {
         try req.require(.roleRead)
-        return try await Role.query(on: req.db, organizationID: req.organizationID)
+        let (filters, page) = try req.listParameters(RoleListFilters.self)
+        var roles = Role.query(on: req.db, organizationID: req.organizationID)
             .with(\.$permissionGrants)
-            .all()
+            .filter(\.$name, contains: filters.name)
+        if let level = filters.level {
+            roles = roles.filter(\.$level == level.rawValue)
+        }
+        return try await roles
+            .newestFirst(\.$updatedAt)
+            .paginate(page)
             .map { $0.toGetDTO() }
     }
 

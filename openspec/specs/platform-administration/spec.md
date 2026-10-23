@@ -29,11 +29,15 @@ The system SHALL provide a `platform-admin` CLI command that, given an email, fi
 - **THEN** the command fails without changes
 
 ### Requirement: Organization provisioning
-The system SHALL expose `POST /platform/organizations`, available only to authenticated platform administrators, which in one transaction creates the organization, copies all role templates into it, and creates an invitation for the first administrator pre-assigned the "Organization Administrator" role. The response SHALL include the organization and the invitation token.
+The system SHALL expose `POST /platform/organizations`, available only to authenticated platform administrators, which in one transaction creates the organization, copies all role templates and group templates into it, and creates an invitation for the first administrator into the "Organization Administrators" group. The response SHALL include the organization and the invitation token.
 
 #### Scenario: Provision organization
 - **WHEN** a platform admin provisions "Acme LLC" with first admin `cfo@acme.com`
-- **THEN** the organization, its template roles, and an invitation for `cfo@acme.com` with the Organization Administrator role exist, and the token is returned
+- **THEN** the organization, its template roles and groups, and an invitation for `cfo@acme.com` into the Organization Administrators group exist, and the token is returned
+
+#### Scenario: First administrator holds every organization permission
+- **WHEN** `cfo@acme.com` accepts the provisioning invitation
+- **THEN** they belong to Organization Administrators and hold every organization-level permission
 
 #### Scenario: Non-admin provisioning
 - **WHEN** a user without the flag calls `POST /platform/organizations`
@@ -41,7 +45,7 @@ The system SHALL expose `POST /platform/organizations`, available only to authen
 
 #### Scenario: Provisioning failure is atomic
 - **WHEN** any step of provisioning fails
-- **THEN** no organization, role, or invitation is persisted
+- **THEN** no organization, role, group, or invitation is persisted
 
 ### Requirement: No implicit tenant access
 The platform administrator flag SHALL NOT grant membership, permissions, or data access in any organization. Organization-scoped routes SHALL treat platform administrators like any other user.

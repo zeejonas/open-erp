@@ -46,12 +46,28 @@ struct GroupController: RouteCollection {
     }
 
     @Sendable
-    func index(req: Request) async throws -> [GetGroupDTO] {
+    func index(req: Request) async throws -> Page<GetGroupDTO> {
         try req.require(.groupRead)
-        return try await AccessGroup.query(on: req.db, organizationID: req.organizationID)
+        let (filters, page) = try req.listParameters(GroupListFilters.self)
+        var groups = AccessGroup.query(on: req.db, organizationID: req.organizationID)
             .with(\.$roles)
             .with(\.$companies)
-            .all()
+            .filter(\.$name, contains: filters.name)
+        if let roleID = filters.roleId {
+            groups = groups
+                .join(GroupRole.self, on: \AccessGroup.$id == \GroupRole.$group.$id)
+                .filter(GroupRole.self, \.$role.$id == roleID)
+                .filter(GroupRole.self, \.$deletedAt == nil)
+        }
+        if let companyID = filters.companyId {
+            groups = groups
+                .join(GroupCompany.self, on: \AccessGroup.$id == \GroupCompany.$group.$id)
+                .filter(GroupCompany.self, \.$company.$id == companyID)
+                .filter(GroupCompany.self, \.$deletedAt == nil)
+        }
+        return try await groups
+            .newestFirst(\.$updatedAt)
+            .paginate(page)
             .map { $0.toGetDTO() }
     }
 
@@ -114,14 +130,16 @@ struct GroupController: RouteCollection {
     }
 
     @Sendable
-    func listMembers(req: Request) async throws -> [GetGroupMemberDTO] {
+    func listMembers(req: Request) async throws -> Page<GetGroupMemberDTO> {
         try req.require(.groupMemberRead)
+        let (_, page) = try req.listParameters(NoFilters.self)
         let group = try await findGroup(req: req)
         let members = try await GroupMember.query(on: req.db)
             .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
             .filter(\.$group.$id == group.requireID())
             .filter(OrganizationUser.self, \.$deletedAt == nil)
-            .all()
+            .newestFirst(\.$createdAt)
+            .paginate(page)
         return try members.map { member in
             let membership = try member.joined(OrganizationUser.self)
             return member.toGetDTO(userID: membership.$user.id)

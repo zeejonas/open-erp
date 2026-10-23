@@ -113,8 +113,8 @@ extension OpenERPTests {
                 authorize(&req, token: adminToken, organizationID: orgAID)
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
-                let pending = try res.content.decode([GetInvitationDTO].self)
-                #expect(Set(pending.map(\.email)) == ["bea@acme.com", "doomed@acme.com"])
+                let pending = try res.content.decode(Page<GetInvitationDTO>.self)
+                #expect(Set(pending.items.map(\.email)) == ["bea@acme.com", "doomed@acme.com"])
             })
 
             let before = try await User.query(on: app.db).count()

@@ -36,13 +36,15 @@ struct MeController: RouteCollection {
     }
 
     @Sendable
-    func organizations(req: Request) async throws -> [GetOrganizationDTO] {
+    func organizations(req: Request) async throws -> Page<GetOrganizationDTO> {
+        let (_, page) = try req.listParameters(NoFilters.self)
         let userID = try req.userID()
         let memberships = try await OrganizationUser.query(on: req.db)
             .filter(\.$user.$id == userID)
             .join(Organization.self, on: \OrganizationUser.$organization.$id == \Organization.$id)
             .filter(Organization.self, \.$deletedAt == nil)
-            .all()
+            .newestFirst(Organization.self, \.$updatedAt)
+            .paginate(page)
         return try memberships.map { try $0.joined(Organization.self).toGetDTO() }
     }
 }
