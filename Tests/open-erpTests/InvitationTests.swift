@@ -20,68 +20,71 @@ extension OpenERPTests {
                     .organizationInvitationCreate,
                     .organizationInvitationRead,
                     .organizationInvitationDelete,
-                    .roleCreate,
-                    .roleDelete,
                 ]
             )
-            _ = try await createMember(
-                on: app.db,
-                organizationID: orgBID,
-                email: "admin-b@example.com",
-                subject: "admin-b",
-                permissions: [.roleCreate]
-            )
             let adminToken = try await signAccessToken(on: app, subject: "admin-a")
-            let adminBToken = try await signAccessToken(on: app, subject: "admin-b")
 
-            var foreignRoleID: UUID?
-            try await app.testing().test(.POST, "roles", beforeRequest: { req in
-                authorize(&req, token: adminBToken, organizationID: orgBID)
-                try req.content.encode(CreateRoleDTO(name: "Foreign", level: "organization", permissions: ["company:read"]))
-            }, afterResponse: { res async throws in
-                #expect(res.status == .ok)
-                foreignRoleID = try res.content.decode(GetRoleDTO.self).id
-            })
-
+            let foreign = AccessGroup(organizationID: orgBID, name: "Foreign", createdByID: nil)
+            try await foreign.save(on: app.db)
             try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
                 try req.content.encode(CreateInvitationDTO(
                     email: "bea@acme.com",
                     firstName: "Bea",
                     lastName: "Admin",
-                    roleId: foreignRoleID
+                    groupId: try foreign.requireID()
                 ))
             }, afterResponse: { res async in
                 #expect(res.status == .badRequest)
             })
 
-            var companyRoleID: UUID?
-            try await app.testing().test(.POST, "roles", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateRoleDTO(name: "Company Scoped", level: "company", permissions: []))
-            }, afterResponse: { res async throws in
-                #expect(res.status == .ok)
-                companyRoleID = try res.content.decode(GetRoleDTO.self).id
-            })
+            let removed = AccessGroup(organizationID: orgAID, name: "Removed", createdByID: nil)
+            try await removed.save(on: app.db)
+            try await removed.delete(on: app.db)
             try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
                 try req.content.encode(CreateInvitationDTO(
                     email: "bea@acme.com",
                     firstName: "Bea",
                     lastName: "Admin",
-                    roleId: companyRoleID
+                    groupId: try removed.requireID()
                 ))
             }, afterResponse: { res async in
                 #expect(res.status == .badRequest)
             })
 
-            var adminRoleID: UUID?
-            try await app.testing().test(.POST, "roles", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateRoleDTO(name: "Auditor", level: "organization", permissions: ["company:read"]))
-            }, afterResponse: { res async throws in
-                adminRoleID = try res.content.decode(GetRoleDTO.self).id
+            let doomed = AccessGroup(organizationID: orgAID, name: "Doomed", createdByID: nil)
+            try await doomed.save(on: app.db)
+            let (_, doomedToken) = try await OrganizationInvitation.issue(
+                organizationID: orgAID,
+                email: "doomed@acme.com",
+                firstName: "Doomed",
+                lastName: "Invite",
+                groupID: try doomed.requireID(),
+                createdByID: nil,
+                on: app.db
+            )
+            try await doomed.delete(on: app.db)
+            let usersBeforeDoomed = try await User.query(on: app.db).count()
+            let membershipsBeforeDoomed = try await OrganizationUser.query(on: app.db).count()
+            stubUserInfo(app, email: "doomed@acme.com", emailVerified: true)
+            let doomedUserToken = try await signAccessToken(on: app, subject: "doomed-user")
+            try await app.testing().test(.POST, "invitations/accept", beforeRequest: { req in
+                authorize(&req, token: doomedUserToken)
+                try req.content.encode(AcceptInvitationDTO(token: doomedToken))
+            }, afterResponse: { res async in
+                #expect(res.status == .badRequest)
             })
+            #expect(try await User.query(on: app.db).count() == usersBeforeDoomed)
+            #expect(try await OrganizationUser.query(on: app.db).count() == membershipsBeforeDoomed)
+            let doomedInvite = try await OrganizationInvitation.query(on: app.db)
+                .filter(\.$tokenHash == InvitationToken.hash(doomedToken))
+                .first()
+            #expect(doomedInvite?.acceptedAt == nil)
+
+            let viewers = AccessGroup(organizationID: orgAID, name: "Organization Viewers", createdByID: nil)
+            try await viewers.save(on: app.db)
+            let viewersID = try viewers.requireID()
 
             var inviteToken = ""
             try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
@@ -90,7 +93,7 @@ extension OpenERPTests {
                     email: "bea@acme.com",
                     firstName: "Bea",
                     lastName: "Acme",
-                    roleId: adminRoleID
+                    groupId: viewersID
                 ))
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
@@ -111,13 +114,7 @@ extension OpenERPTests {
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 let pending = try res.content.decode([GetInvitationDTO].self)
-                #expect(pending.map(\.email) == ["bea@acme.com"])
-            })
-
-            try await app.testing().test(.DELETE, "roles/\(try #require(adminRoleID))", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-            }, afterResponse: { res async in
-                #expect(res.status == .conflict, "A role used by a pending invitation cannot be deleted")
+                #expect(Set(pending.map(\.email)) == ["bea@acme.com", "doomed@acme.com"])
             })
 
             let before = try await User.query(on: app.db).count()
@@ -158,10 +155,11 @@ extension OpenERPTests {
             let membership = try await OrganizationUser.query(on: app.db, organizationID: orgAID)
                 .filter(\.$user.$id == beaID)
                 .first()
-            let assignment = try await OrganizationRoleAssignment.query(on: app.db)
+            let groupMembership = try await GroupMember.query(on: app.db)
                 .filter(\.$organizationUser.$id == membership!.requireID())
                 .first()
-            #expect(assignment?.$role.id == adminRoleID)
+            #expect(groupMembership?.$group.id == viewersID)
+            #expect(groupMembership?.$createdBy.id == beaID)
 
             try await app.testing().test(.POST, "invitations/accept", beforeRequest: { req in
                 authorize(&req, token: beaToken)
@@ -175,7 +173,7 @@ extension OpenERPTests {
                 email: "bea@acme.com",
                 firstName: "Bea",
                 lastName: "Acme",
-                roleID: nil,
+                groupID: nil,
                 createdByID: nil,
                 on: app.db
             )
@@ -196,7 +194,7 @@ extension OpenERPTests {
                 email: conflictEmail,
                 firstName: "Taken",
                 lastName: "User",
-                roleID: nil,
+                groupID: nil,
                 createdByID: nil,
                 on: app.db
             )
@@ -217,7 +215,7 @@ extension OpenERPTests {
                 email: "bea@acme.com",
                 firstName: "Bea",
                 lastName: "Acme",
-                roleID: nil,
+                groupID: nil,
                 createdByID: nil,
                 on: app.db
             )
@@ -234,7 +232,7 @@ extension OpenERPTests {
                 email: "late@acme.com",
                 firstName: "Late",
                 lastName: "User",
-                roleID: nil,
+                groupID: nil,
                 createdByID: nil,
                 on: app.db
             )
@@ -253,7 +251,7 @@ extension OpenERPTests {
             var revokedToken = ""
             try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateInvitationDTO(email: "revoked@acme.com", firstName: "Rev", lastName: "Oked", roleId: nil))
+                try req.content.encode(CreateInvitationDTO(email: "revoked@acme.com", firstName: "Rev", lastName: "Oked", groupId: nil))
             }, afterResponse: { res async throws in
                 let body = try res.content.decode(CreateInvitationResponse.self)
                 revokedID = body.invitation.id
@@ -279,7 +277,7 @@ extension OpenERPTests {
                 email: "revoked@acme.com",
                 firstName: "Rev",
                 lastName: "Oked",
-                roleID: nil,
+                groupID: nil,
                 createdByID: nil,
                 on: app.db
             )
@@ -290,6 +288,78 @@ extension OpenERPTests {
             }, afterResponse: { res async in
                 #expect(res.status == .notFound, "Invitations to a deleted organization cannot be accepted")
             })
+        }
+    }
+
+    @Test("A re-invited member's old groups grant nothing")
+    func reinvitedMemberLosesPreviousGroups() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
+            let orgID = try org.requireID()
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "admin@example.com",
+                subject: "admin",
+                permissions: [.organizationUserDelete, .organizationInvitationCreate]
+            )
+            let returning = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "ann@example.com",
+                subject: "ann",
+                permissions: [.companyRead]
+            )
+            let returningID = try returning.requireID()
+            let adminToken = try await signAccessToken(on: app, subject: "admin")
+            let annToken = try await signAccessToken(on: app, subject: "ann")
+
+            try await app.testing().test(.GET, "companies", beforeRequest: { req in
+                authorize(&req, token: annToken, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .ok)
+            })
+            try await app.testing().test(.DELETE, "organization-users/\(returningID)", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .noContent)
+            })
+
+            var inviteToken = ""
+            try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgID)
+                try req.content.encode(CreateInvitationDTO(email: "ann@example.com", firstName: "Ann", lastName: "A", groupId: nil))
+            }, afterResponse: { res async throws in
+                inviteToken = try res.content.decode(CreateInvitationResponse.self).token
+            })
+            stubUserInfo(app, email: "ann@example.com", emailVerified: true)
+            try await app.testing().test(.POST, "invitations/accept", beforeRequest: { req in
+                authorize(&req, token: annToken)
+                try req.content.encode(AcceptInvitationDTO(token: inviteToken))
+            }, afterResponse: { res async in
+                #expect(res.status == .ok)
+            })
+            try await app.testing().test(.GET, "companies", beforeRequest: { req in
+                authorize(&req, token: annToken, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .forbidden)
+            })
+
+            let memberships = try await OrganizationUser.query(on: app.db, organizationID: orgID)
+                .filter(\.$user.$id == returningID)
+                .withDeleted()
+                .all()
+            let removed = try #require(memberships.first { $0.deletedAt != nil })
+            let groupMembership = try await GroupMember.query(on: app.db)
+                .filter(\.$organizationUser.$id == removed.requireID())
+                .withDeleted()
+                .first()
+            #expect(groupMembership?.deletedAt != nil)
+            let active = try #require(memberships.first { $0.deletedAt == nil })
+            let restored = try await GroupMember.query(on: app.db)
+                .filter(\.$organizationUser.$id == active.requireID())
+                .first()
+            #expect(restored == nil)
         }
     }
 }

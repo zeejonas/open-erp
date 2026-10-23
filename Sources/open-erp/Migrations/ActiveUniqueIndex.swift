@@ -13,10 +13,6 @@ extension Database {
         try await index.run()
     }
 
-    func dropIndex(_ name: String) async throws {
-        try await sql().drop(index: name).run()
-    }
-
     private func sql() throws -> any SQLDatabase {
         guard let sql = self as? any SQLDatabase else {
             throw MigrationRequiresSQL()

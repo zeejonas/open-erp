@@ -55,17 +55,24 @@ struct OrganizationMiddleware: AsyncMiddleware {
 }
 
 /// Fluent soft-deletes only the base model, so every joined table filters `deleted_at` itself.
+/// Company eligibility is stored on `group_companies` and is not read here until a company-level permission exists.
 private func loadPermissions(userID: UUID, organizationID: UUID, on db: any Database) async throws -> Set<Permission> {
     let grants = try await RolePermission.query(on: db)
         .join(Role.self, on: \RolePermission.$role.$id == \Role.$id)
-        .join(OrganizationRoleAssignment.self, on: \Role.$id == \OrganizationRoleAssignment.$role.$id)
-        .join(OrganizationUser.self, on: \OrganizationRoleAssignment.$organizationUser.$id == \OrganizationUser.$id)
+        .join(GroupRole.self, on: \Role.$id == \GroupRole.$role.$id)
+        .join(AccessGroup.self, on: \GroupRole.$group.$id == \AccessGroup.$id)
+        .join(GroupMember.self, on: \AccessGroup.$id == \GroupMember.$group.$id)
+        .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
         .filter(OrganizationUser.self, \.$user.$id == userID)
         .filter(OrganizationUser.self, \.$organization.$id == organizationID)
         .filter(OrganizationUser.self, \.$deletedAt == nil)
         .filter(Role.self, \.$organization.$id == organizationID)
+        .filter(Role.self, \.$level == RoleLevel.organization.rawValue)
         .filter(Role.self, \.$deletedAt == nil)
-        .filter(OrganizationRoleAssignment.self, \.$deletedAt == nil)
+        .filter(GroupRole.self, \.$deletedAt == nil)
+        .filter(AccessGroup.self, \.$organization.$id == organizationID)
+        .filter(AccessGroup.self, \.$deletedAt == nil)
+        .filter(GroupMember.self, \.$deletedAt == nil)
         .all()
     return Set(grants.compactMap { Permission(rawValue: $0.permission) })
 }

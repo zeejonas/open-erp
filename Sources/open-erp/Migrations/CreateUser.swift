@@ -15,7 +15,10 @@ struct CreateUser: AsyncMigration {
             .field("created_at", .datetime)
             .field("updated_at", .datetime)
             .field("deleted_at", .datetime)
+            .field("auth_subject", .string)
+            .field("is_platform_admin", .bool, .required, .sql(.default(false)))
             .unique(on: "email")
+            .unique(on: "auth_subject")
             .create()
     }
 

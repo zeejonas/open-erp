@@ -18,5 +18,5 @@ func routes(_ app: Application) throws {
     try app.register(collection: UserController())
     try app.register(collection: OrganizationUserController())
     try app.register(collection: RoleController())
-    try app.register(collection: OrganizationRoleAssignmentController())
+    try app.register(collection: GroupController())
 }

@@ -18,8 +18,8 @@ struct InvitationController: RouteCollection {
         try req.require(.organizationInvitationCreate)
         try CreateInvitationDTO.validate(content: req)
         let dto = try req.content.decode(CreateInvitationDTO.self)
-        if let roleID = dto.roleId {
-            try await requireOrganizationRole(roleID, on: req)
+        if let groupID = dto.groupId {
+            try await requireActiveGroup(groupID, on: req)
         }
 
         let (invitation, token) = try await OrganizationInvitation.issue(
@@ -27,7 +27,7 @@ struct InvitationController: RouteCollection {
             email: dto.email,
             firstName: dto.firstName,
             lastName: dto.lastName,
-            roleID: dto.roleId,
+            groupID: dto.groupId,
             createdByID: try req.userID(),
             on: req.db
         )
@@ -88,23 +88,26 @@ struct InvitationController: RouteCollection {
                     throw Abort(.notFound)
                 }
 
+                let organizationID = current.$organization.id
+                if let groupID = current.$group.id {
+                    guard try await AccessGroup.query(on: db, organizationID: organizationID)
+                        .filter(\.$id == groupID)
+                        .first() != nil
+                    else {
+                        throw Abort(.badRequest, reason: "Invitation group is not an active group in this organization")
+                    }
+                }
+
                 let user = try await resolveUser(subject: token.subjectID, invitation: current, on: db)
                 let userID = try user.requireID()
-                let organizationID = current.$organization.id
 
                 let membership = OrganizationUser(organizationID: organizationID, userID: userID, createdByID: userID)
                 try await membership.save(on: db)
 
-                if let roleID = current.$role.id {
-                    guard let role = try await Role.find(roleID, on: db),
-                        role.$organization.id == organizationID,
-                        role.roleLevel == .organization
-                    else {
-                        throw Abort(.badRequest, reason: "Invitation role is not an organization-level role in this organization")
-                    }
-                    try await OrganizationRoleAssignment(
+                if let groupID = current.$group.id {
+                    try await GroupMember(
+                        groupID: groupID,
                         organizationUserID: try membership.requireID(),
-                        roleID: roleID,
                         createdByID: userID
                     ).save(on: db)
                 }
@@ -119,13 +122,12 @@ struct InvitationController: RouteCollection {
     }
 }
 
-private func requireOrganizationRole(_ roleID: UUID, on req: Request) async throws {
-    guard let role = try await Role.query(on: req.db, organizationID: req.organizationID)
-        .filter(\.$id == roleID)
-        .first(),
-        role.roleLevel == .organization
+private func requireActiveGroup(_ groupID: UUID, on req: Request) async throws {
+    guard try await AccessGroup.query(on: req.db, organizationID: req.organizationID)
+        .filter(\.$id == groupID)
+        .first() != nil
     else {
-        throw Abort(.badRequest, reason: "Role must be an organization-level role in this organization")
+        throw Abort(.badRequest, reason: "Group must be an active group in this organization")
     }
 }
 

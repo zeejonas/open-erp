@@ -74,7 +74,14 @@ struct CompanyController: RouteCollection {
     func delete(req: Request) async throws -> HTTPStatus {
         try req.require(.companyDelete)
         let company = try await self.findCompany(req: req)
-        try await company.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
+        let actorID = try req.userID()
+        let companyID = try company.requireID()
+        try await req.db.transaction { db in
+            for link in try await GroupCompany.query(on: db).filter(\.$company.$id == companyID).all() {
+                try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+            }
+            try await company.softDelete(by: actorID, \.$deletedBy, on: db)
+        }
         return .noContent
     }
 

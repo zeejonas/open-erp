@@ -34,6 +34,13 @@ struct OpenERPTests {
             })
 
             let companyID = try #require(createdCompanyID)
+            let group = AccessGroup(organizationID: orgID, name: "Plant", createdByID: userID)
+            try await group.save(on: app.db)
+            try await GroupCompany(
+                groupID: try group.requireID(),
+                companyID: companyID,
+                createdByID: userID
+            ).save(on: app.db)
             try await app.testing().test(.DELETE, "companies/\(companyID)", beforeRequest: { req in
                 authorize(&req, token: token, organizationID: orgID)
             }, afterResponse: { res async in
@@ -43,6 +50,12 @@ struct OpenERPTests {
             let deleted = try await Company.query(on: app.db).withDeleted().filter(\.$id == companyID).first()
             #expect(deleted?.deletedAt != nil)
             #expect(deleted?.$deletedBy.id == userID)
+            let eligibility = try await GroupCompany.query(on: app.db)
+                .filter(\.$company.$id == companyID)
+                .withDeleted()
+                .first()
+            #expect(eligibility?.deletedAt != nil)
+            #expect(eligibility?.$deletedBy.id == userID)
         }
     }
 
@@ -197,7 +210,7 @@ struct OpenERPTests {
                 #expect(res.status == .forbidden)
             })
 
-            let revoked = try await OrganizationRoleAssignment.query(on: app.db)
+            let revoked = try await GroupMember.query(on: app.db)
                 .filter(\.$organizationUser.$id == membership!.requireID())
                 .withDeleted()
                 .first()
@@ -207,7 +220,7 @@ struct OpenERPTests {
             var inviteToken = ""
             try await app.testing().test(.POST, "organization-invitations", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgID)
-                try req.content.encode(CreateInvitationDTO(email: "ann@example.com", firstName: "Ann", lastName: "A", roleId: nil))
+                try req.content.encode(CreateInvitationDTO(email: "ann@example.com", firstName: "Ann", lastName: "A", groupId: nil))
             }, afterResponse: { res async throws in
                 inviteToken = try res.content.decode(CreateInvitationResponse.self).token
             })

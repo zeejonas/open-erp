@@ -10,7 +10,6 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("email", .string, .required)
             .field("first_name", .string, .required)
             .field("last_name", .string, .required)
-            .field("role_id", .uuid, .references("roles", "id"))
             .field("token_hash", .string, .required)
             .field("expires_at", .datetime, .required)
             .field("accepted_at", .datetime)
@@ -19,6 +18,7 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("deleted_by", .uuid, .references("users", "id"))
             .field("created_at", .datetime)
             .field("deleted_at", .datetime)
+            .field("group_id", .uuid, .references("groups", "id"))
             .unique(on: "token_hash")
             .create()
     }

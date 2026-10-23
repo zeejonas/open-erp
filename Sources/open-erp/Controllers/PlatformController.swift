@@ -29,8 +29,9 @@ struct PlatformController: RouteCollection {
                 let organizationID = try organization.requireID()
 
                 let roles = try await Role.copyTemplates(into: organizationID, createdByID: actorID, on: db)
-                guard let adminRole = roles.first(where: { $0.templateKey == RoleTemplate.organizationAdministrator.key }) else {
-                    throw Abort(.internalServerError, reason: "Organization Administrator template was not copied")
+                let groups = try await AccessGroup.copyTemplates(into: organizationID, roles: roles, createdByID: actorID, on: db)
+                guard let adminGroup = groups.first(where: { $0.templateKey == GroupTemplate.organizationAdministrators.key }) else {
+                    throw Abort(.internalServerError, reason: "Organization Administrators template was not copied")
                 }
 
                 let (_, token) = try await OrganizationInvitation.issue(
@@ -38,7 +39,7 @@ struct PlatformController: RouteCollection {
                     email: dto.adminEmail,
                     firstName: dto.adminFirstName,
                     lastName: dto.adminLastName,
-                    roleID: try adminRole.requireID(),
+                    groupID: try adminGroup.requireID(),
                     createdByID: actorID,
                     on: db
                 )

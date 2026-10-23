@@ -7,6 +7,8 @@ Write the simplest, most readable code. Balance configurability with streamlined
 ## Documentation
 Read current Vapor documentation because prior knowledge is outdated. Use https://docs.vapor.codes/ and https://api.vapor.codes/.
 
+Follow the pre-release migration policy in `openspec/config.yaml`.
+
 ## Compliance
 Design for SOX compliance and SOC controls.
 

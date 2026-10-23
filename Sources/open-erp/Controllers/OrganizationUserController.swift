@@ -9,7 +9,7 @@ struct OrganizationUserController: RouteCollection {
         }
     }
 
-    /// Removes the member and revokes every role assignment held through that membership.
+    /// Removes the member and every group membership held through that membership.
     @Sendable
     func delete(req: Request) async throws -> HTTPStatus {
         try req.require(.organizationUserDelete)
@@ -27,17 +27,11 @@ struct OrganizationUserController: RouteCollection {
         let actorID = try req.userID()
         let membershipID = try membership.requireID()
         try await req.db.transaction { db in
-            for assignment in try await OrganizationRoleAssignment.query(on: db)
+            for groupMembership in try await GroupMember.query(on: db)
                 .filter(\.$organizationUser.$id == membershipID)
                 .all()
             {
-                try await assignment.softDelete(by: actorID, \.$deletedBy, on: db)
-            }
-            for assignment in try await CompanyRoleAssignment.query(on: db)
-                .filter(\.$organizationUser.$id == membershipID)
-                .all()
-            {
-                try await assignment.softDelete(by: actorID, \.$deletedBy, on: db)
+                try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)
             }
             try await membership.softDelete(by: actorID, \.$deletedBy, on: db)
         }

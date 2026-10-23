@@ -97,7 +97,7 @@ struct RoleController: RouteCollection {
         try req.require(.roleDelete)
         let role = try await findRole(req: req)
         if try await role.isInUse(on: req.db) {
-            throw Abort(.conflict, reason: "Role is assigned or used by a pending invitation")
+            throw Abort(.conflict, reason: "Role is attached to an active group")
         }
         try await role.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
         return .noContent

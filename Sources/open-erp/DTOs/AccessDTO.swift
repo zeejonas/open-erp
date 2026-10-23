@@ -16,7 +16,7 @@ struct CreateInvitationDTO: Content {
     var email: String
     var firstName: String
     var lastName: String
-    var roleId: UUID?
+    var groupId: UUID?
 }
 
 extension CreateInvitationDTO: Validatable {
@@ -32,7 +32,7 @@ struct GetInvitationDTO: Content {
     var email: String
     var firstName: String
     var lastName: String
-    var roleId: UUID?
+    var groupId: UUID?
     var expiresAt: Date
     var acceptedAt: Date?
     var createdById: UUID?
@@ -98,16 +98,72 @@ struct GetRoleDTO: Content {
     var deletedAt: Date?
 }
 
-struct CreateOrganizationRoleAssignmentDTO: Content {
+struct CreateGroupDTO: Content {
+    var name: String
+}
+
+extension CreateGroupDTO: Validatable {
+    static func validations(_ validations: inout Validations) {
+        validations.add("name", as: String.self, is: !.empty && .count(1...100), customFailureDescription: "Name must be 1-100 characters")
+    }
+}
+
+struct PatchGroupDTO: Content {
+    var name: String?
+}
+
+extension PatchGroupDTO: Validatable {
+    static func validations(_ validations: inout Validations) {
+        validations.add("name", as: String.self, is: !.empty && .count(1...100), required: false, customFailureDescription: "Name must be 1-100 characters")
+    }
+}
+
+struct GetGroupDTO: Content {
+    var id: UUID?
+    var name: String
+    var templateKey: String?
+    var roleIds: [UUID]
+    var companyIds: [UUID]
+    var createdById: UUID?
+    var updatedById: UUID?
+    var deletedById: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+    var deletedAt: Date?
+}
+
+struct AddGroupMemberDTO: Content {
     var userId: UUID
+}
+
+struct GetGroupMemberDTO: Content {
+    var id: UUID?
+    var userId: UUID
+    var organizationUserId: UUID
+    var createdById: UUID?
+    var createdAt: Date?
+}
+
+struct AddGroupRoleDTO: Content {
     var roleId: UUID
 }
 
-struct GetOrganizationRoleAssignmentDTO: Content {
+struct GetGroupRoleDTO: Content {
     var id: UUID?
-    var organizationUserId: UUID
-    var userId: UUID
+    var groupId: UUID
     var roleId: UUID
+    var createdById: UUID?
+    var createdAt: Date?
+}
+
+struct AddGroupCompanyDTO: Content {
+    var companyId: UUID
+}
+
+struct GetGroupCompanyDTO: Content {
+    var id: UUID?
+    var groupId: UUID
+    var companyId: UUID
     var createdById: UUID?
     var createdAt: Date?
 }

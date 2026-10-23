@@ -33,9 +33,18 @@ extension OpenERPTests {
             ProtectedRoute(method: .GET, path: "roles/\(missingID)", permission: .roleRead),
             ProtectedRoute(method: .PATCH, path: "roles/\(missingID)", permission: .roleUpdate),
             ProtectedRoute(method: .DELETE, path: "roles/\(missingID)", permission: .roleDelete),
-            ProtectedRoute(method: .POST, path: "organization-role-assignments", permission: .organizationRoleAssignmentCreate),
-            ProtectedRoute(method: .GET, path: "organization-role-assignments", permission: .organizationRoleAssignmentRead),
-            ProtectedRoute(method: .DELETE, path: "organization-role-assignments/\(missingID)", permission: .organizationRoleAssignmentDelete),
+            ProtectedRoute(method: .POST, path: "groups", permission: .groupCreate),
+            ProtectedRoute(method: .GET, path: "groups", permission: .groupRead),
+            ProtectedRoute(method: .GET, path: "groups/\(missingID)", permission: .groupRead),
+            ProtectedRoute(method: .PATCH, path: "groups/\(missingID)", permission: .groupUpdate),
+            ProtectedRoute(method: .DELETE, path: "groups/\(missingID)", permission: .groupDelete),
+            ProtectedRoute(method: .POST, path: "groups/\(missingID)/members", permission: .groupMemberCreate),
+            ProtectedRoute(method: .GET, path: "groups/\(missingID)/members", permission: .groupMemberRead),
+            ProtectedRoute(method: .DELETE, path: "groups/\(missingID)/members/\(missingID)", permission: .groupMemberDelete),
+            ProtectedRoute(method: .POST, path: "groups/\(missingID)/roles", permission: .groupRoleCreate),
+            ProtectedRoute(method: .DELETE, path: "groups/\(missingID)/roles/\(missingID)", permission: .groupRoleDelete),
+            ProtectedRoute(method: .POST, path: "groups/\(missingID)/companies", permission: .groupCompanyCreate),
+            ProtectedRoute(method: .DELETE, path: "groups/\(missingID)/companies/\(missingID)", permission: .groupCompanyDelete),
         ]
 
         try await withApp { app in
@@ -60,13 +69,32 @@ extension OpenERPTests {
         }
     }
 
-    @Test("Roles and organization role assignments enforce the catalog")
-    func rolesAndAssignments() async throws {
+    @Test("Organization role assignment routes are removed")
+    func roleAssignmentRoutesRemoved() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
+            let orgID = try org.requireID()
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "admin@example.com",
+                subject: "admin",
+                permissions: Permission.allCases
+            )
+            let token = try await signAccessToken(on: app, subject: "admin")
+            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .notFound)
+            })
+        }
+    }
+
+    @Test("Roles enforce the catalog")
+    func rolesEnforceCatalog() async throws {
         try await withApp { app in
             let orgA = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
-            let orgB = try await createOrganization(on: app.db, code: "ORGB", name: "Org B")
             let orgAID = try orgA.requireID()
-            let orgBID = try orgB.requireID()
             let admin = try await createMember(
                 on: app.db,
                 organizationID: orgAID,
@@ -74,26 +102,16 @@ extension OpenERPTests {
                 subject: "admin",
                 permissions: Permission.allCases
             )
-            let viewer = try await createMember(
+            _ = try await createMember(
                 on: app.db,
                 organizationID: orgAID,
                 email: "viewer@example.com",
                 subject: "viewer",
                 permissions: [.companyRead]
             )
-            let outsider = try await createUser(on: app.db, email: "out@example.com", subject: "outsider")
-            _ = try await createMember(
-                on: app.db,
-                organizationID: orgBID,
-                email: "other-admin@example.com",
-                subject: "other-admin",
-                permissions: [.roleCreate]
-            )
             let adminID = try admin.requireID()
             let adminToken = try await signAccessToken(on: app, subject: "admin")
             let viewerToken = try await signAccessToken(on: app, subject: "viewer")
-            let otherAdminToken = try await signAccessToken(on: app, subject: "other-admin")
-            let viewerID = try viewer.requireID()
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in
                 authorize(&req, token: viewerToken, organizationID: orgAID)
@@ -138,106 +156,27 @@ extension OpenERPTests {
 
             try await app.testing().test(.POST, "roles", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
+                try req.content.encode(CreateRoleDTO(
+                    name: "Legacy",
+                    level: "organization",
+                    permissions: ["organization_role_assignment:create"]
+                ))
+            }, afterResponse: { res async in
+                #expect(res.status == .badRequest)
+            })
+
+            try await app.testing().test(.POST, "roles", beforeRequest: { req in
+                authorize(&req, token: adminToken, organizationID: orgAID)
                 try req.content.encode(CreateRoleDTO(name: "Auditor", level: "organization", permissions: []))
             }, afterResponse: { res async in
                 #expect(res.status == .conflict)
-            })
-
-            var foreignRoleID: UUID?
-            try await app.testing().test(.POST, "roles", beforeRequest: { req in
-                authorize(&req, token: otherAdminToken, organizationID: orgBID)
-                try req.content.encode(CreateRoleDTO(name: "Foreign", level: "organization", permissions: ["company:read"]))
-            }, afterResponse: { res async throws in
-                foreignRoleID = try res.content.decode(GetRoleDTO.self).id
-            })
-
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: try #require(foreignRoleID)))
-            }, afterResponse: { res async in
-                #expect(res.status == .badRequest)
-            })
-
-            var companyRoleID: UUID?
-            try await app.testing().test(.POST, "roles", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateRoleDTO(name: "Plant", level: "company", permissions: []))
-            }, afterResponse: { res async throws in
-                companyRoleID = try res.content.decode(GetRoleDTO.self).id
-            })
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: try #require(companyRoleID)))
-            }, afterResponse: { res async in
-                #expect(res.status == .badRequest)
-            })
-
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: try outsider.requireID(), roleId: try #require(companyRoleID)))
-            }, afterResponse: { res async in
-                #expect(res.status == .notFound)
             })
 
             let viewerRole = try await Role.query(on: app.db, organizationID: orgAID)
                 .filter(\.$name == "permissions-viewer@example.com")
                 .first()
             let viewerRoleID = try #require(viewerRole).requireID()
-            var assignmentID: UUID?
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: viewerRoleID))
-            }, afterResponse: { res async in
-                #expect(res.status == .conflict)
-            })
-
             let auditor = try await Role.query(on: app.db, organizationID: orgAID).filter(\.$name == "Auditor").first()
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: try auditor!.requireID()))
-            }, afterResponse: { res async throws in
-                #expect(res.status == .ok)
-                let body = try res.content.decode(GetOrganizationRoleAssignmentDTO.self)
-                #expect(body.createdById == adminID)
-                assignmentID = body.id
-            })
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: try auditor!.requireID()))
-            }, afterResponse: { res async in
-                #expect(res.status == .conflict)
-            })
-
-            try await app.testing().test(.DELETE, "roles/\(try auditor!.requireID())", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-            }, afterResponse: { res async in
-                #expect(res.status == .conflict)
-            })
-
-            try await app.testing().test(.DELETE, "organization-role-assignments/\(try #require(assignmentID))", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-            }, afterResponse: { res async in
-                #expect(res.status == .noContent)
-            })
-
-            try await app.testing().test(.POST, "organization-role-assignments", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-                try req.content.encode(CreateOrganizationRoleAssignmentDTO(userId: viewerID, roleId: try auditor!.requireID()))
-            }, afterResponse: { res async throws in
-                #expect(res.status == .ok)
-                assignmentID = try res.content.decode(GetOrganizationRoleAssignmentDTO.self).id
-            })
-            let auditorGrants = try await OrganizationRoleAssignment.query(on: app.db)
-                .filter(\.$role.$id == auditor!.requireID())
-                .withDeleted()
-                .all()
-            #expect(auditorGrants.count == 2, "Re-granting keeps the revoked assignment as history")
-            #expect(auditorGrants.contains { $0.$deletedBy.id == adminID })
-            try await app.testing().test(.DELETE, "organization-role-assignments/\(try #require(assignmentID))", beforeRequest: { req in
-                authorize(&req, token: adminToken, organizationID: orgAID)
-            }, afterResponse: { res async in
-                #expect(res.status == .noContent)
-            })
 
             try await app.testing().test(.PATCH, "roles/\(viewerRoleID)", beforeRequest: { req in
                 authorize(&req, token: adminToken, organizationID: orgAID)
@@ -275,6 +214,61 @@ extension OpenERPTests {
             }, afterResponse: { res async in
                 #expect(res.status == .ok, "A deleted role's name can be reused")
             })
+        }
+    }
+
+    @Test("Deleting a role depends on attachment to an active group")
+    func deleteRoleAttachedToGroup() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
+            let orgID = try org.requireID()
+            _ = try await createMember(
+                on: app.db,
+                organizationID: orgID,
+                email: "admin@example.com",
+                subject: "admin",
+                permissions: Permission.allCases
+            )
+            let token = try await signAccessToken(on: app, subject: "admin")
+
+            var roleID: UUID?
+            try await app.testing().test(.POST, "roles", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+                try req.content.encode(CreateRoleDTO(name: "Auditor", level: "organization", permissions: ["company:read"]))
+            }, afterResponse: { res async throws in
+                roleID = try res.content.decode(GetRoleDTO.self).id
+            })
+            var groupID: UUID?
+            try await app.testing().test(.POST, "groups", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+                try req.content.encode(CreateGroupDTO(name: "Auditors"))
+            }, afterResponse: { res async throws in
+                groupID = try res.content.decode(GetGroupDTO.self).id
+            })
+            try await app.testing().test(.POST, "groups/\(try #require(groupID))/roles", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+                try req.content.encode(AddGroupRoleDTO(roleId: try #require(roleID)))
+            }, afterResponse: { res async in
+                #expect(res.status == .ok)
+            })
+            try await app.testing().test(.DELETE, "roles/\(try #require(roleID))", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .conflict)
+            })
+
+            try await app.testing().test(.DELETE, "groups/\(try #require(groupID))", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .noContent)
+            })
+            try await app.testing().test(.DELETE, "roles/\(try #require(roleID))", beforeRequest: { req in
+                authorize(&req, token: token, organizationID: orgID)
+            }, afterResponse: { res async in
+                #expect(res.status == .noContent)
+            })
+            let deleted = try await Role.query(on: app.db).withDeleted().filter(\.$id == roleID!).first()
+            #expect(deleted?.deletedAt != nil)
         }
     }
 }

@@ -37,8 +37,8 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
     @Field(key: "last_name")
     var lastName: String
 
-    @OptionalParent(key: "role_id")
-    var role: Role?
+    @OptionalParent(key: "group_id")
+    var group: AccessGroup?
 
     @Field(key: "token_hash")
     var tokenHash: String
@@ -65,7 +65,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         email: String,
         firstName: String,
         lastName: String,
-        roleID: UUID?,
+        groupID: UUID?,
         tokenHash: String,
         expiresAt: Date,
         createdByID: UUID?
@@ -74,7 +74,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         self.email = email
         self.firstName = firstName
         self.lastName = lastName
-        self.$role.id = roleID
+        self.$group.id = groupID
         self.tokenHash = tokenHash
         self.expiresAt = expiresAt
         self.$createdBy.id = createdByID
@@ -86,7 +86,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
             email: email,
             firstName: firstName,
             lastName: lastName,
-            roleId: $role.id,
+            groupId: $group.id,
             expiresAt: expiresAt,
             acceptedAt: acceptedAt,
             createdById: $createdBy.id
@@ -111,7 +111,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         email: String,
         firstName: String,
         lastName: String,
-        roleID: UUID?,
+        groupID: UUID?,
         createdByID: UUID?,
         on db: any Database
     ) async throws -> (OrganizationInvitation, String) {
@@ -121,7 +121,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
             email: email,
             firstName: firstName,
             lastName: lastName,
-            roleID: roleID,
+            groupID: groupID,
             tokenHash: InvitationToken.hash(token),
             expiresAt: Date().addingTimeInterval(InvitationToken.lifetime),
             createdByID: createdByID

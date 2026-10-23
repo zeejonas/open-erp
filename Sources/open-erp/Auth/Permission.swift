@@ -22,9 +22,17 @@ enum Permission: String, Codable, CaseIterable, Sendable {
     case roleRead = "role:read"
     case roleUpdate = "role:update"
     case roleDelete = "role:delete"
-    case organizationRoleAssignmentCreate = "organization_role_assignment:create"
-    case organizationRoleAssignmentRead = "organization_role_assignment:read"
-    case organizationRoleAssignmentDelete = "organization_role_assignment:delete"
+    case groupCreate = "group:create"
+    case groupRead = "group:read"
+    case groupUpdate = "group:update"
+    case groupDelete = "group:delete"
+    case groupMemberCreate = "group_member:create"
+    case groupMemberRead = "group_member:read"
+    case groupMemberDelete = "group_member:delete"
+    case groupRoleCreate = "group_role:create"
+    case groupRoleDelete = "group_role:delete"
+    case groupCompanyCreate = "group_company:create"
+    case groupCompanyDelete = "group_company:delete"
 
     /// Every permission shipped in this change is organization-wide.
     /// Company-scoped permissions arrive with company-level enforcement.
@@ -54,6 +62,26 @@ struct RoleTemplate: Sendable {
     )
 
     static let all = [organizationAdministrator, organizationViewer]
+}
+
+struct GroupTemplate: Sendable {
+    var key: String
+    var name: String
+    var roleKeys: [String]
+
+    static let organizationAdministrators = GroupTemplate(
+        key: "org_admins",
+        name: "Organization Administrators",
+        roleKeys: [RoleTemplate.organizationAdministrator.key]
+    )
+
+    static let organizationViewers = GroupTemplate(
+        key: "org_viewers",
+        name: "Organization Viewers",
+        roleKeys: [RoleTemplate.organizationViewer.key]
+    )
+
+    static let all = [organizationAdministrators, organizationViewers]
 }
 
 func permissions(from rawValues: [String], level: RoleLevel) throws -> [Permission] {

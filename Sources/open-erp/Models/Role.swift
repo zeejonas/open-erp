@@ -105,16 +105,13 @@ final class Role: Model, @unchecked Sendable {
         try await $permissionGrants.load(on: db)
     }
 
-    /// Assigned roles, and roles a pending invitation will assign, cannot be deleted.
+    /// A role attached to an active group cannot be deleted. Attachments on a deleted group do not count.
     func isInUse(on db: any Database) async throws -> Bool {
-        let roleID = try requireID()
-        if try await OrganizationRoleAssignment.query(on: db).filter(\.$role.$id == roleID).first() != nil {
-            return true
-        }
-        if try await CompanyRoleAssignment.query(on: db).filter(\.$role.$id == roleID).first() != nil {
-            return true
-        }
-        return try await OrganizationInvitation.pending(on: db).filter(\.$role.$id == roleID).first() != nil
+        try await GroupRole.query(on: db)
+            .join(AccessGroup.self, on: \GroupRole.$group.$id == \AccessGroup.$id)
+            .filter(\.$role.$id == requireID())
+            .filter(AccessGroup.self, \.$deletedAt == nil)
+            .first() != nil
     }
 }
 
@@ -141,75 +138,6 @@ final class RolePermission: Model, @unchecked Sendable {
     init(roleID: UUID, permission: String, createdByID: UUID? = nil) {
         self.$role.id = roleID
         self.permission = permission
-        self.$createdBy.id = createdByID
-    }
-}
-
-final class OrganizationRoleAssignment: Model, @unchecked Sendable {
-    static let schema = "organization_role_assignments"
-
-    @ID(custom: .id, generatedBy: .database)
-    var id: UUID?
-
-    @Parent(key: "organization_user_id")
-    var organizationUser: OrganizationUser
-
-    @Parent(key: "role_id")
-    var role: Role
-
-    @OptionalParent(key: "created_by") var createdBy: User?
-    @OptionalParent(key: "deleted_by") var deletedBy: User?
-
-    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
-
-    init() {}
-
-    init(organizationUserID: UUID, roleID: UUID, createdByID: UUID? = nil) {
-        self.$organizationUser.id = organizationUserID
-        self.$role.id = roleID
-        self.$createdBy.id = createdByID
-    }
-
-    func toGetDTO(userID: UUID) -> GetOrganizationRoleAssignmentDTO {
-        .init(
-            id: id,
-            organizationUserId: $organizationUser.id,
-            userId: userID,
-            roleId: $role.id,
-            createdById: $createdBy.id,
-            createdAt: createdAt
-        )
-    }
-}
-
-final class CompanyRoleAssignment: Model, @unchecked Sendable {
-    static let schema = "company_role_assignments"
-
-    @ID(custom: .id, generatedBy: .database)
-    var id: UUID?
-
-    @Parent(key: "organization_user_id")
-    var organizationUser: OrganizationUser
-
-    @Parent(key: "role_id")
-    var role: Role
-
-    @Parent(key: "company_id")
-    var company: Company
-
-    @OptionalParent(key: "created_by") var createdBy: User?
-    @OptionalParent(key: "deleted_by") var deletedBy: User?
-
-    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
-    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
-
-    init() {}
-
-    init(organizationUserID: UUID, roleID: UUID, companyID: UUID, createdByID: UUID? = nil) {
-        self.$organizationUser.id = organizationUserID
-        self.$role.id = roleID
-        self.$company.id = companyID
         self.$createdBy.id = createdByID
     }
 }
