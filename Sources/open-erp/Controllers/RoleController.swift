@@ -14,7 +14,7 @@ struct RoleController: RouteCollection {
     }
 
     @Sendable
-    func create(req: Request) async throws -> GetRoleDTO {
+    func create(req: Request) async throws -> ApprovalOutcome<GetRoleDTO> {
         try req.require(.roleCreate)
         try CreateRoleDTO.validate(content: req)
         let dto = try req.content.decode(CreateRoleDTO.self)
@@ -22,17 +22,11 @@ struct RoleController: RouteCollection {
             throw Abort(.badRequest, reason: "level must be organization or company")
         }
         let permissions = try permissions(from: dto.permissions, level: level)
-        let actorID = try req.userID()
-
-        let role = try await conflictOnDuplicate(Self.duplicateName) {
-            try await req.db.transaction { db in
-                let role = Role(organizationID: req.organizationID, name: dto.name, level: level, createdByID: actorID)
-                try await role.save(on: db)
-                try await role.setPermissions(permissions, actorID: actorID, on: db)
-                return role
-            }
-        }
-        return role.toGetDTO()
+        return try await req.approvals.submit(.roleCreate(RoleDraft(
+            name: dto.name,
+            level: level.rawValue,
+            permissions: permissions.map(\.rawValue).sorted()
+        )))
     }
 
     @Sendable
@@ -60,57 +54,39 @@ struct RoleController: RouteCollection {
     }
 
     @Sendable
-    func patch(req: Request) async throws -> GetRoleDTO {
+    func patch(req: Request) async throws -> ApprovalOutcome<GetRoleDTO> {
         try req.require(.roleUpdate)
         try PatchRoleDTO.validate(content: req)
         let dto = try req.content.decode(PatchRoleDTO.self)
         let role = try await findRole(req: req)
-
         if let level = dto.level, level != role.level {
             throw Abort(.badRequest, reason: "Role level cannot change")
         }
+        try await role.$permissionGrants.load(on: req.db)
+        let before = RoleSnapshot(name: role.name, permissions: role.permissionGrants.map(\.permission).sorted())
+        var after = before
         if let name = dto.name {
-            role.name = name
+            after.name = name
         }
-
-        let updatedPermissions: [Permission]?
         if let rawPermissions = dto.permissions {
             guard let level = role.roleLevel else {
                 throw Abort(.badRequest, reason: "Role level is invalid")
             }
-            updatedPermissions = try permissions(from: rawPermissions, level: level)
-        } else {
-            updatedPermissions = nil
+            after.permissions = try permissions(from: rawPermissions, level: level).map(\.rawValue).sorted()
         }
-        let actorID = try req.userID()
-
-        let saved = try await conflictOnDuplicate(Self.duplicateName) {
-            try await req.db.transaction { db in
-                if let updatedPermissions {
-                    try await role.setPermissions(updatedPermissions, actorID: actorID, on: db)
-                } else {
-                    try await role.$permissionGrants.load(on: db)
-                }
-                role.$updatedBy.id = actorID
-                try await role.update(on: db)
-                return role
-            }
-        }
-        return saved.toGetDTO()
+        return try await req.approvals.submit(.roleUpdate(id: try role.requireID(), before: before, after: after))
     }
 
     @Sendable
-    func delete(req: Request) async throws -> HTTPStatus {
+    func delete(req: Request) async throws -> ApprovalOutcome<HTTPStatus> {
         try req.require(.roleDelete)
         let role = try await findRole(req: req)
-        if try await role.isInUse(on: req.db) {
-            throw Abort(.conflict, reason: "Role is attached to an active group")
-        }
-        try await role.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
-        return .noContent
+        try await role.$permissionGrants.load(on: req.db)
+        return try await req.approvals.submit(.roleDelete(
+            id: try role.requireID(),
+            before: RoleSnapshot(name: role.name, permissions: role.permissionGrants.map(\.permission).sorted())
+        ))
     }
-
-    private static let duplicateName = "A role with this name already exists"
 
     private func findRole(req: Request) async throws -> Role {
         guard let roleID = req.parameters.get("roleID", as: UUID.self) else {

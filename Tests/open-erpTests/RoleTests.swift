@@ -45,6 +45,15 @@ extension OpenERPTests {
             ProtectedRoute(method: .DELETE, path: "groups/\(missingID)/roles/\(missingID)", permission: .groupRoleDelete),
             ProtectedRoute(method: .POST, path: "groups/\(missingID)/companies", permission: .groupCompanyCreate),
             ProtectedRoute(method: .DELETE, path: "groups/\(missingID)/companies/\(missingID)", permission: .groupCompanyDelete),
+            ProtectedRoute(method: .GET, path: "approval-catalog", permission: .approvalPolicyRead),
+            ProtectedRoute(method: .POST, path: "approval-policies", permission: .approvalPolicyCreate),
+            ProtectedRoute(method: .GET, path: "approval-policies", permission: .approvalPolicyRead),
+            ProtectedRoute(method: .GET, path: "approval-policies/\(missingID)", permission: .approvalPolicyRead),
+            ProtectedRoute(method: .GET, path: "approval-policies/\(missingID)/versions", permission: .approvalPolicyRead),
+            ProtectedRoute(method: .PATCH, path: "approval-policies/\(missingID)", permission: .approvalPolicyUpdate),
+            ProtectedRoute(method: .DELETE, path: "approval-policies/\(missingID)", permission: .approvalPolicyDelete),
+            ProtectedRoute(method: .GET, path: "approval-requests", permission: .approvalRequestRead),
+            ProtectedRoute(method: .POST, path: "approval-requests/\(missingID)/override", permission: .approvalOverrideCreate),
         ]
 
         try await withApp { app in

@@ -19,6 +19,7 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("created_at", .datetime)
             .field("deleted_at", .datetime)
             .field("group_id", .uuid, .references("groups", "id"))
+            .field("approval_request_id", .uuid, .references("approval_requests", "id"))
             .unique(on: "token_hash")
             .create()
     }

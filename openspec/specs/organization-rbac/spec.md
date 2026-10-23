@@ -18,6 +18,9 @@ The system SHALL define permissions in code as `resource:action`, where action i
 - `group_member:create`, `group_member:read`, `group_member:delete`
 - `group_role:create`, `group_role:delete`
 - `group_company:create`, `group_company:delete`
+- `approval_policy:create`, `approval_policy:read`, `approval_policy:update`, `approval_policy:delete`
+- `approval_request:read`
+- `approval_override:create`
 
 #### Scenario: Unknown permission rejected
 - **WHEN** a client creates or updates a role with a permission string not in the catalog
@@ -26,6 +29,10 @@ The system SHALL define permissions in code as `resource:action`, where action i
 #### Scenario: Removed assignment permission rejected
 - **WHEN** a client creates a role with `organization_role_assignment:create`
 - **THEN** the system responds `400 Bad Request`
+
+#### Scenario: Templates include approval permissions
+- **WHEN** an organization is provisioned
+- **THEN** "Organization Administrator" holds every approval permission including `approval_override:create`, and "Organization Viewer" holds `approval_policy:read` and `approval_request:read`
 
 ### Requirement: Zero-trust enforcement
 A user SHALL hold an organization-level permission in an organization only if their active membership belongs, through an active group membership, to an active group in that organization that holds an active attachment to an active organization-level role whose permissions include it. Groups SHALL be the only path to a role. No permission SHALL be implied by a missing, null, or default value, by template origin, by company eligibility, or by the platform administrator flag.
@@ -55,7 +62,7 @@ A user SHALL hold an organization-level permission in an organization only if th
 - **THEN** the system responds `403 Forbidden`
 
 ### Requirement: Route permissions
-Organization-scoped routes SHALL require these permissions:
+Organization-scoped routes SHALL require these permissions. A gateable write SHALL require its permission before it is matched to approval policies. Approving, rejecting, and withdrawing require no permission and are authorized by approver eligibility and by being the requester, as the approval-workflows capability defines.
 
 | Route | Permission |
 |---|---|
@@ -86,6 +93,14 @@ Organization-scoped routes SHALL require these permissions:
 | `DELETE /groups/:groupID/roles/:roleID` | `group_role:delete` |
 | `POST /groups/:groupID/companies` | `group_company:create` |
 | `DELETE /groups/:groupID/companies/:companyID` | `group_company:delete` |
+| `GET /approval-catalog` | `approval_policy:read` |
+| `POST /approval-policies` | `approval_policy:create` |
+| `GET /approval-policies`, `GET /approval-policies/:id`, `GET /approval-policies/:id/versions` | `approval_policy:read` |
+| `PATCH /approval-policies/:id` | `approval_policy:update` |
+| `DELETE /approval-policies/:id` | `approval_policy:delete` |
+| `GET /approval-requests` | `approval_request:read` |
+| `GET /approval-requests/:id` | `approval_request:read`, or the requester, or a currently eligible approver |
+| `POST /approval-requests/:id/override` | `approval_override:create` |
 
 #### Scenario: Each route enforces its permission
 - **WHEN** a member lacking the listed permission calls the route

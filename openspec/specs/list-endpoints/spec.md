@@ -7,7 +7,7 @@ Paging, strict query parameters, fixed order, and filters for every collection e
 ## Requirements
 
 ### Requirement: Paged list responses
-Every endpoint that returns a collection SHALL respond with `{ "items": [...], "metadata": { "page", "per", "total" } }`, where `total` counts every matching row in the caller's scope. This SHALL apply to `GET /companies`, `/users`, `/roles`, `/groups`, `/groups/:groupID/members`, `/organization-invitations`, `/me/organizations`, and every collection endpoint added later. A page past the last one SHALL return `200` with no items and the real `total`.
+Every endpoint that returns a collection SHALL respond with `{ "items": [...], "metadata": { "page", "per", "total" } }`, where `total` counts every matching row in the caller's scope. This SHALL apply to `GET /companies`, `/users`, `/roles`, `/groups`, `/groups/:groupID/members`, `/organization-invitations`, `/me/organizations`, `/approval-policies`, `/approval-policies/:id/versions`, `/approval-requests`, and every collection endpoint added later. A page past the last one SHALL return `200` with no items and the real `total`.
 
 #### Scenario: First page by default
 - **WHEN** a member with `role:read` calls `GET /roles` in an organization with 30 roles and sends no paging parameters
@@ -68,6 +68,9 @@ Every list SHALL be ordered newest first by the listed model's `updatedAt`, or b
 | `GET /me/organizations` | organization `updatedAt` |
 | `GET /groups/:groupID/members` | group membership `createdAt` |
 | `GET /organization-invitations` | invitation `createdAt` |
+| `GET /approval-policies` | policy `updatedAt` |
+| `GET /approval-policies/:id/versions` | version `createdAt` |
+| `GET /approval-requests` | request `updatedAt` |
 
 #### Scenario: Recently edited first
 - **WHEN** company "B" was created after company "A", "A" is then renamed, and a member calls `GET /companies`
@@ -93,6 +96,9 @@ Text filters SHALL match a case-insensitive substring, and `%`, `_`, and `\` in 
 | `GET /organization-invitations` | `email` | `groupId` |
 | `GET /groups/:groupID/members` | none | none |
 | `GET /me/organizations` | none | none |
+| `GET /approval-policies` | `name` | `permission`: a gateable permission; `groupId`: policies with a slot naming that group; `companyId`: policies scoped to that company |
+| `GET /approval-policies/:id/versions` | none | none |
+| `GET /approval-requests` | none | `status`: `pending`, `applied`, `rejected`, `withdrawn`, or `failed`; `permission`: a gateable permission; `requestedBy`: a user ID |
 
 #### Scenario: Case-insensitive substring
 - **WHEN** companies "Acme Corp" and "Globex" exist and a member calls `GET /companies?name=acme`
@@ -125,3 +131,7 @@ Text filters SHALL match a case-insensitive substring, and `%`, `_`, and `\` in 
 #### Scenario: Malformed ID
 - **WHEN** a member calls `GET /groups?roleId=abc`
 - **THEN** the system responds `400` and names `roleId`
+
+#### Scenario: Policies routing to a group
+- **WHEN** "Role changes" names group "Security" in a slot, "Company edits" does not, and a member with `approval_policy:read` calls `GET /approval-policies?groupId=<Security>`
+- **THEN** only "Role changes" is returned

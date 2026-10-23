@@ -14,24 +14,17 @@ struct InvitationController: RouteCollection {
     }
 
     @Sendable
-    func create(req: Request) async throws -> CreateInvitationResponse {
+    func create(req: Request) async throws -> ApprovalOutcome<CreateInvitationResponse> {
         try req.require(.organizationInvitationCreate)
         try CreateInvitationDTO.validate(content: req)
         let dto = try req.content.decode(CreateInvitationDTO.self)
-        if let groupID = dto.groupId {
-            try await requireActiveGroup(groupID, on: req)
-        }
-
-        let (invitation, token) = try await OrganizationInvitation.issue(
-            organizationID: req.organizationID,
+        return try await req.approvals.submit(.organizationInvitationCreate(InvitationDraft(
             email: dto.email,
             firstName: dto.firstName,
             lastName: dto.lastName,
-            groupID: dto.groupId,
-            createdByID: try req.userID(),
-            on: req.db
-        )
-        return CreateInvitationResponse(invitation: invitation.toGetDTO(), token: token)
+            groupId: dto.groupId,
+            invitationId: nil
+        )))
     }
 
     @Sendable
@@ -51,20 +44,12 @@ struct InvitationController: RouteCollection {
     }
 
     @Sendable
-    func revoke(req: Request) async throws -> HTTPStatus {
+    func revoke(req: Request) async throws -> ApprovalOutcome<HTTPStatus> {
         try req.require(.organizationInvitationDelete)
         guard let invitationID = req.parameters.get("invitationID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid invitation ID")
         }
-        guard let invitation = try await OrganizationInvitation.query(on: req.db, organizationID: req.organizationID)
-            .filter(\.$id == invitationID)
-            .filter(\.$acceptedAt == nil)
-            .first()
-        else {
-            throw Abort(.notFound)
-        }
-        try await invitation.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
-        return .noContent
+        return try await req.approvals.submit(.organizationInvitationDelete(id: invitationID))
     }
 
     @Sendable
@@ -96,6 +81,13 @@ struct InvitationController: RouteCollection {
                 }
 
                 let organizationID = current.$organization.id
+                if let requestID = current.$approvalRequest.id {
+                    guard let approval = try await ApprovalRequest.find(requestID, on: db),
+                        approval.status == ApprovalRequestStatus.applied.rawValue
+                    else {
+                        throw Abort(.conflict, reason: "Invitation is waiting for approval")
+                    }
+                }
                 if let groupID = current.$group.id {
                     guard try await AccessGroup.query(on: db, organizationID: organizationID)
                         .filter(\.$id == groupID)
@@ -126,15 +118,6 @@ struct InvitationController: RouteCollection {
                 return AcceptInvitationResponse(user: user.toGetDTO(), organizationId: organizationID)
             }
         }
-    }
-}
-
-private func requireActiveGroup(_ groupID: UUID, on req: Request) async throws {
-    guard try await AccessGroup.query(on: req.db, organizationID: req.organizationID)
-        .filter(\.$id == groupID)
-        .first() != nil
-    else {
-        throw Abort(.badRequest, reason: "Group must be an active group in this organization")
     }
 }
 

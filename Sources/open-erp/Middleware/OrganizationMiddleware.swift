@@ -54,9 +54,19 @@ struct OrganizationMiddleware: AsyncMiddleware {
     }
 }
 
+func isActiveMember(userID: UUID, organizationID: UUID, on db: any Database) async throws -> Bool {
+    try await OrganizationUser.query(on: db)
+        .join(Organization.self, on: \OrganizationUser.$organization.$id == \Organization.$id)
+        .filter(\.$user.$id == userID)
+        .filter(\.$organization.$id == organizationID)
+        .filter(\.$deletedAt == nil)
+        .filter(Organization.self, \.$deletedAt == nil)
+        .first() != nil
+}
+
 /// Fluent soft-deletes only the base model, so every joined table filters `deleted_at` itself.
 /// Company eligibility is stored on `group_companies` and is not read here until a company-level permission exists.
-private func loadPermissions(userID: UUID, organizationID: UUID, on db: any Database) async throws -> Set<Permission> {
+func loadPermissions(userID: UUID, organizationID: UUID, on db: any Database) async throws -> Set<Permission> {
     let grants = try await RolePermission.query(on: db)
         .join(Role.self, on: \RolePermission.$role.$id == \Role.$id)
         .join(GroupRole.self, on: \Role.$id == \GroupRole.$role.$id)
@@ -75,4 +85,25 @@ private func loadPermissions(userID: UUID, organizationID: UUID, on db: any Data
         .filter(GroupMember.self, \.$deletedAt == nil)
         .all()
     return Set(grants.compactMap { Permission(rawValue: $0.permission) })
+}
+
+func activeGroupIDs(userID: UUID, organizationID: UUID, on db: any Database) async throws -> Set<UUID> {
+    let memberships = try await GroupMember.query(on: db)
+        .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
+        .join(AccessGroup.self, on: \GroupMember.$group.$id == \AccessGroup.$id)
+        .filter(OrganizationUser.self, \.$user.$id == userID)
+        .filter(OrganizationUser.self, \.$organization.$id == organizationID)
+        .filter(OrganizationUser.self, \.$deletedAt == nil)
+        .filter(AccessGroup.self, \.$organization.$id == organizationID)
+        .filter(AccessGroup.self, \.$deletedAt == nil)
+        .all()
+    return Set(memberships.map(\.$group.id))
+}
+
+func activeMemberCount(groupID: UUID, on db: any Database) async throws -> Int {
+    try await GroupMember.query(on: db)
+        .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
+        .filter(\.$group.$id == groupID)
+        .filter(OrganizationUser.self, \.$deletedAt == nil)
+        .count()
 }

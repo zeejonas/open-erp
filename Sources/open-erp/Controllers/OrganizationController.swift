@@ -19,36 +19,29 @@ struct OrganizationController: RouteCollection {
     }
 
     @Sendable
-    func patch(req: Request) async throws -> GetOrganizationDTO {
+    func patch(req: Request) async throws -> ApprovalOutcome<GetOrganizationDTO> {
         try req.require(.organizationUpdate)
         try PatchOrganizationDTO.validate(content: req)
         let dto = try req.content.decode(PatchOrganizationDTO.self)
-
         guard let organization = try await Organization.find(req.organizationID, on: req.db) else {
             throw Abort(.notFound)
         }
-
-        if let code = dto.code {
-            organization.code = code
-        }
-        if let name = dto.name {
-            organization.name = name
-        }
-        organization.$updatedBy.id = try req.userID()
-
-        try await conflictOnDuplicate("An organization with this code already exists") {
-            try await organization.update(on: req.db)
-        }
-        return organization.toGetDTO()
+        let before = CodeNameSnapshot(code: organization.code, name: organization.name)
+        var after = before
+        if let code = dto.code { after.code = code }
+        if let name = dto.name { after.name = name }
+        return try await req.approvals.submit(.organizationUpdate(id: req.organizationID, before: before, after: after))
     }
 
     @Sendable
-    func delete(req: Request) async throws -> HTTPStatus {
+    func delete(req: Request) async throws -> ApprovalOutcome<HTTPStatus> {
         try req.require(.organizationDelete)
         guard let organization = try await Organization.find(req.organizationID, on: req.db) else {
             throw Abort(.notFound)
         }
-        try await organization.softDelete(by: req.userID(), \.$deletedBy, on: req.db)
-        return .noContent
+        return try await req.approvals.submit(.organizationDelete(
+            id: req.organizationID,
+            before: CodeNameSnapshot(code: organization.code, name: organization.name)
+        ))
     }
 }

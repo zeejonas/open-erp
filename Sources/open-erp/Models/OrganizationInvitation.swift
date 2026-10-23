@@ -40,6 +40,9 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
     @OptionalParent(key: "group_id")
     var group: AccessGroup?
 
+    @OptionalParent(key: "approval_request_id")
+    var approvalRequest: ApprovalRequest?
+
     @Field(key: "token_hash")
     var tokenHash: String
 
@@ -68,7 +71,8 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         groupID: UUID?,
         tokenHash: String,
         expiresAt: Date,
-        createdByID: UUID?
+        createdByID: UUID?,
+        approvalRequestID: UUID? = nil
     ) {
         self.$organization.id = organizationID
         self.email = email
@@ -78,6 +82,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         self.tokenHash = tokenHash
         self.expiresAt = expiresAt
         self.$createdBy.id = createdByID
+        self.$approvalRequest.id = approvalRequestID
     }
 
     func toGetDTO() -> GetInvitationDTO {
@@ -113,9 +118,12 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         lastName: String,
         groupID: UUID?,
         createdByID: UUID?,
+        id: UUID? = nil,
+        token: String? = nil,
+        approvalRequestID: UUID? = nil,
         on db: any Database
     ) async throws -> (OrganizationInvitation, String) {
-        let token = InvitationToken.generate()
+        let token = token ?? InvitationToken.generate()
         let invitation = OrganizationInvitation(
             organizationID: organizationID,
             email: email,
@@ -124,8 +132,12 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
             groupID: groupID,
             tokenHash: InvitationToken.hash(token),
             expiresAt: Date().addingTimeInterval(InvitationToken.lifetime),
-            createdByID: createdByID
+            createdByID: createdByID,
+            approvalRequestID: approvalRequestID
         )
+        if let id {
+            invitation.id = id
+        }
         try await invitation.save(on: db)
         return (invitation, token)
     }

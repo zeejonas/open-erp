@@ -27,23 +27,11 @@ struct CompanyController: RouteCollection {
     }
 
     @Sendable
-    func create(req: Request) async throws -> GetCompanyDTO {
+    func create(req: Request) async throws -> ApprovalOutcome<GetCompanyDTO> {
         try req.require(.companyCreate)
         try CreateCompanyDTO.validate(content: req)
         let dto = try req.content.decode(CreateCompanyDTO.self)
-
-        let company = Company(
-            code: dto.code,
-            name: dto.name,
-            organizationID: req.organizationID,
-            createdBy: req.user,
-            updatedBy: nil,
-            deletedBy: nil
-        )
-        try await conflictOnDuplicate(Self.duplicateCode) {
-            try await company.save(on: req.db)
-        }
-        return company.toGetDTO()
+        return try await req.approvals.submit(.companyCreate(CodeNameSnapshot(code: dto.code, name: dto.name)))
     }
 
     @Sendable
@@ -54,42 +42,27 @@ struct CompanyController: RouteCollection {
     }
 
     @Sendable
-    func patch(req: Request) async throws -> GetCompanyDTO {
+    func patch(req: Request) async throws -> ApprovalOutcome<GetCompanyDTO> {
         try req.require(.companyUpdate)
         try PatchCompanyDTO.validate(content: req)
         let dto = try req.content.decode(PatchCompanyDTO.self)
         let company = try await self.findCompany(req: req)
-
-        if let code = dto.code {
-            company.code = code
-        }
-        if let name = dto.name {
-            company.name = name
-        }
-        company.$updatedBy.id = try req.userID()
-
-        try await conflictOnDuplicate(Self.duplicateCode) {
-            try await company.update(on: req.db)
-        }
-        return company.toGetDTO()
+        let before = CodeNameSnapshot(code: company.code, name: company.name)
+        var after = before
+        if let code = dto.code { after.code = code }
+        if let name = dto.name { after.name = name }
+        return try await req.approvals.submit(.companyUpdate(id: try company.requireID(), before: before, after: after))
     }
 
     @Sendable
-    func delete(req: Request) async throws -> HTTPStatus {
+    func delete(req: Request) async throws -> ApprovalOutcome<HTTPStatus> {
         try req.require(.companyDelete)
         let company = try await self.findCompany(req: req)
-        let actorID = try req.userID()
-        let companyID = try company.requireID()
-        try await req.db.transaction { db in
-            for link in try await GroupCompany.query(on: db).filter(\.$company.$id == companyID).all() {
-                try await link.softDelete(by: actorID, \.$deletedBy, on: db)
-            }
-            try await company.softDelete(by: actorID, \.$deletedBy, on: db)
-        }
-        return .noContent
+        return try await req.approvals.submit(.companyDelete(
+            id: try company.requireID(),
+            before: CodeNameSnapshot(code: company.code, name: company.name)
+        ))
     }
-
-    private static let duplicateCode = "A company with this code already exists"
 
     private func findCompany(req: Request) async throws -> Company {
         guard let companyID = req.parameters.get("companyID", as: UUID.self) else {

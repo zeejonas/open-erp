@@ -78,6 +78,34 @@ struct GroupListFilters: ListFilters {
     }
 }
 
+struct ApprovalPolicyListFilters: ListFilters {
+    static let keys: Set<String> = ["name", "permission", "groupId", "companyId"]
+    var name: String?
+    var permission: String?
+    var groupId: UUID?
+    var companyId: UUID?
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("name", as: String.self, is: !.empty, required: false)
+        validations.add("permission", as: String.self, is: !.empty, required: false)
+        validations.add("groupId", as: UUID.self, required: false)
+        validations.add("companyId", as: UUID.self, required: false)
+    }
+}
+
+struct ApprovalRequestListFilters: ListFilters {
+    static let keys: Set<String> = ["status", "permission", "requestedBy"]
+    var status: ApprovalRequestStatus?
+    var permission: String?
+    var requestedBy: UUID?
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("status", as: String.self, is: .case(of: ApprovalRequestStatus.self), required: false)
+        validations.add("permission", as: String.self, is: !.empty, required: false)
+        validations.add("requestedBy", as: UUID.self, required: false)
+    }
+}
+
 struct InvitationListFilters: ListFilters {
     static let keys: Set<String> = ["email", "groupId"]
     var email: String?

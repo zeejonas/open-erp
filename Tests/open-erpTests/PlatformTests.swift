@@ -59,9 +59,17 @@ extension OpenERPTests {
             let adminRole = try #require(roles.first { $0.templateKey == "org_admin" })
             let viewerRole = try #require(roles.first { $0.templateKey == "org_viewer" })
             #expect(adminRole.name == "Organization Administrator")
-            #expect(Set(adminRole.permissionGrants.map(\.permission)) == Set(Permission.allCases.map(\.rawValue)))
+            let adminPermissions = Set(adminRole.permissionGrants.map(\.permission))
+            #expect(adminPermissions == Set(Permission.allCases.map(\.rawValue)))
+            #expect(adminPermissions.contains(Permission.approvalOverrideCreate.rawValue))
             #expect(viewerRole.name == "Organization Viewer")
-            #expect(Set(viewerRole.permissionGrants.map(\.permission)) == Set(Permission.allCases.filter(\.isRead).map(\.rawValue)))
+            let viewerPermissions = Set(viewerRole.permissionGrants.map(\.permission))
+            #expect(viewerPermissions == Set(Permission.allCases.filter(\.isRead).map(\.rawValue)))
+            #expect(viewerPermissions.isSuperset(of: [
+                Permission.approvalPolicyRead.rawValue,
+                Permission.approvalRequestRead.rawValue,
+            ]))
+            #expect(!viewerPermissions.contains(Permission.approvalOverrideCreate.rawValue))
 
             let groups = try await AccessGroup.query(on: app.db, organizationID: orgID)
                 .with(\.$roles)

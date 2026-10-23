@@ -31,10 +31,17 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateGroupMember())
     app.migrations.add(CreateGroupRole())
     app.migrations.add(CreateGroupCompany())
+    app.migrations.add(CreateApprovalPolicy())
+    app.migrations.add(CreateApprovalPolicySlot())
+    app.migrations.add(CreateApprovalPolicyVersion())
+    app.migrations.add(CreateApprovalRequest())
+    app.migrations.add(CreateApprovalRequestTrack())
+    app.migrations.add(CreateApprovalDecision())
     app.migrations.add(CreateOrganizationInvitation())
 
     try await configureAuthentication(app)
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
+    app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")
 
     // register routes
     try routes(app)
