@@ -3,6 +3,35 @@ Enterprise software without the robbery.
 
 ## Getting Started
 
+Create a local `.env` from `.env.example` and configure Postgres and OIDC before
+starting the server. Vapor reads `.env` from the working directory; run commands
+from the project root. In Xcode, set the scheme's working directory to that same
+folder. Existing process environment variables override `.env` values.
+
+For Auth0, register an API under **Applications → APIs** with identifier
+`https://api.open-erp.local` and RS256 signing. This identifier is the backend's
+`OIDC_AUDIENCE`. Your SPA under **Applications → Applications** is the login
+client; its Client ID is separate from the API audience. No client secret is
+required by this backend.
+
+Find your tenant's endpoints at
+`https://YOUR_AUTH0_DOMAIN/.well-known/openid-configuration` and map them into `.env`:
+
+| Variable | Auth0 value |
+| --- | --- |
+| `OIDC_ISSUER` | `issuer`, including its trailing slash |
+| `OIDC_AUDIENCE` | The registered API's Identifier |
+| `OIDC_JWKS_URL` | `jwks_uri` |
+| `OIDC_USERINFO_URL` | `userinfo_endpoint` |
+
+When logging in through the SPA, request that API audience and the
+`openid profile email` scopes, then send the access token as a Bearer token.
+Configure the SPA's callback, logout, and web origin URLs for the frontend that
+performs login.
+
+See [Auth0 API settings](https://auth0.com/docs/get-started/apis/api-settings) and
+[Vapor environment configuration](https://docs.vapor.codes/basics/environment/).
+
 To build the project using the Swift Package Manager, run the following command in the terminal from the root of the project:
 ```bash
 swift build
@@ -17,6 +46,25 @@ To execute tests, use the following command:
 ```bash
 swift test
 ```
+
+## API documentation
+
+With the server running, open [Swagger UI](http://localhost:8080/docs).
+The generated OpenAPI specification is available at `/openapi.json`.
+Both documentation endpoints are public and contain API metadata only.
+Swagger UI loads its pinned JavaScript and CSS from unpkg, so the browser needs internet access.
+
+Use **Authorize** to enter an OIDC access token, then supply `X-Organization-ID`
+on organization endpoints. Requests use the same authentication, membership, permission,
+and approval checks as any other API client. “Try it out” executes real API requests.
+Approval-controlled writes may return `202` with an approval request instead of applying immediately.
+
+Keep `.openAPI(...)` annotations beside route registrations when adding or changing endpoints.
+Request and response schemas come from the existing DTOs; no generated spec needs to be checked in.
+Approval responses use a synthetic example because their validating decoder cannot be reflected.
+See [VaporToOpenAPI](https://github.com/dankinsoid/VaporToOpenAPI),
+[Vapor routing](https://docs.vapor.codes/basics/routing/), and
+[Swagger UI installation](https://swagger.io/docs/open-source-tools/swagger-ui/usage/installation/).
 
 ### See more
 
