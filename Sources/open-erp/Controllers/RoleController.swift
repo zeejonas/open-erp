@@ -1,15 +1,58 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct RoleController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let roles = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("roles")
         roles.post(use: self.create)
+            .openAPI(
+                summary: "Create role",
+                description: "Requires role:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(CreateRoleDTO.self),
+                response: .type(GetRoleDTO.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         roles.get(use: self.index)
+            .openAPI(
+                summary: "List roles",
+                description: "Requires role:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(RoleListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetRoleDTO>.self),
+                auth: .bearer()
+            )
         roles.group(":roleID") { role in
             role.get(use: self.show)
+                .openAPI(
+                    summary: "Get role",
+                    description: "Requires role:read.",
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(GetRoleDTO.self),
+                    auth: .bearer()
+                )
             role.patch(use: self.patch)
+                .openAPI(
+                    summary: "Update role",
+                    description: "Requires role:update. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    body: .type(PatchRoleDTO.self),
+                    response: .type(GetRoleDTO.self),
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             role.delete(use: self.delete)
+                .openAPI(
+                    summary: "Delete role",
+                    description: "Requires role:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }
 

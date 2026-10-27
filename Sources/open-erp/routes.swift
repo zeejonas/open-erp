@@ -1,14 +1,15 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 func routes(_ app: Application) throws {
     app.get { req async in
         "It works!"
-    }
+    }.excludeFromOpenAPI()
 
     app.get("hello") { req async -> String in
         "Hello, world!"
-    }
+    }.excludeFromOpenAPI()
 
     try app.register(collection: MeController())
     try app.register(collection: PlatformController())
@@ -21,4 +22,5 @@ func routes(_ app: Application) throws {
     try app.register(collection: GroupController())
     try app.register(collection: ApprovalPolicyController())
     try app.register(collection: ApprovalRequestController())
+    registerAPIDocumentation(app)
 }

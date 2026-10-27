@@ -1,11 +1,21 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct OrganizationUserController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let links = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("organization-users")
         links.group(":userID") { link in
             link.delete(use: self.delete)
+                .openAPI(
+                    summary: "Delete organization user",
+                    description: "Requires organization_user:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }
 

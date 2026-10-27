@@ -1,12 +1,38 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct OrganizationController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let scoped = routes.grouped(AuthMiddleware(), OrganizationMiddleware())
         scoped.get("organization", use: self.show)
+            .openAPI(
+                summary: "Get organization",
+                description: "Requires organization:read.",
+                headers: .type(OrganizationHeaders.self),
+                response: .type(GetOrganizationDTO.self),
+                auth: .bearer()
+            )
         scoped.patch("organization", use: self.patch)
+            .openAPI(
+                summary: "Update organization",
+                description: "Requires organization:update. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(PatchOrganizationDTO.self),
+                response: .type(GetOrganizationDTO.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         scoped.delete("organization", use: self.delete)
+            .openAPI(
+                summary: "Delete organization",
+                description: "Requires organization:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                responseDescription: "Deleted",
+                statusCode: 204,
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
     }
 
     @Sendable

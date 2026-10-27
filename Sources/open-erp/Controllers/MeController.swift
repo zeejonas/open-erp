@@ -1,12 +1,31 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct MeController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let authed = routes.grouped(AuthMiddleware())
         authed.get("me", use: self.show)
+            .openAPI(
+                summary: "Get me",
+                response: .type(GetUserDTO.self),
+                auth: .bearer()
+            )
         authed.patch("me", use: self.patch)
+            .openAPI(
+                summary: "Update me",
+                body: .type(PatchMeDTO.self),
+                response: .type(GetUserDTO.self),
+                auth: .bearer()
+            )
         authed.get("me", "organizations", use: self.organizations)
+            .openAPI(
+                summary: "List my organizations",
+                description: "Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(NoFilters.self)],
+                response: .type(Page<GetOrganizationDTO>.self),
+                auth: .bearer()
+            )
     }
 
     @Sendable

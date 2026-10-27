@@ -1,32 +1,137 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct GroupController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let groups = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("groups")
         groups.post(use: self.create)
+            .openAPI(
+                summary: "Create group",
+                description: "Requires group:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(CreateGroupDTO.self),
+                response: .type(GetGroupDTO.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         groups.get(use: self.index)
+            .openAPI(
+                summary: "List groups",
+                description: "Requires group:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(GroupListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetGroupDTO>.self),
+                auth: .bearer()
+            )
         groups.group(":groupID") { group in
             group.get(use: self.show)
+                .openAPI(
+                    summary: "Get group",
+                    description: "Requires group:read.",
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(GetGroupDTO.self),
+                    auth: .bearer()
+                )
             group.patch(use: self.patch)
+                .openAPI(
+                    summary: "Update group",
+                    description: "Requires group:update. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    body: .type(PatchGroupDTO.self),
+                    response: .type(GetGroupDTO.self),
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             group.delete(use: self.delete)
+                .openAPI(
+                    summary: "Delete group",
+                    description: "Requires group:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             group.group("members") { members in
                 members.post(use: self.addMember)
+                    .openAPI(
+                        summary: "Add group member",
+                        description: "Requires group_member:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                        headers: .type(OrganizationHeaders.self),
+                        body: .type(AddGroupMemberDTO.self),
+                        response: .type(GetGroupMemberDTO.self),
+                        auth: .bearer()
+                    )
+                    .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 members.get(use: self.listMembers)
+                    .openAPI(
+                        summary: "List group members",
+                        description: "Requires group_member:read. Newest createdAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                        query: [.type(ListPage.self), .type(NoFilters.self)],
+                        headers: .type(OrganizationHeaders.self),
+                        response: .type(Page<GetGroupMemberDTO>.self),
+                        auth: .bearer()
+                    )
                 members.group(":userID") { member in
                     member.delete(use: self.removeMember)
+                        .openAPI(
+                            summary: "Remove group member",
+                            description: "Requires group_member:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                            headers: .type(OrganizationHeaders.self),
+                            responseDescription: "Deleted",
+                            statusCode: 204,
+                            auth: .bearer()
+                        )
+                        .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }
             group.group("roles") { roles in
                 roles.post(use: self.addRole)
+                    .openAPI(
+                        summary: "Add group role",
+                        description: "Requires group_role:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                        headers: .type(OrganizationHeaders.self),
+                        body: .type(AddGroupRoleDTO.self),
+                        response: .type(GetGroupRoleDTO.self),
+                        auth: .bearer()
+                    )
+                    .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 roles.group(":roleID") { role in
                     role.delete(use: self.removeRole)
+                        .openAPI(
+                            summary: "Remove group role",
+                            description: "Requires group_role:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                            headers: .type(OrganizationHeaders.self),
+                            responseDescription: "Deleted",
+                            statusCode: 204,
+                            auth: .bearer()
+                        )
+                        .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }
             group.group("companies") { companies in
                 companies.post(use: self.addCompany)
+                    .openAPI(
+                        summary: "Add group company",
+                        description: "Requires group_company:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                        headers: .type(OrganizationHeaders.self),
+                        body: .type(AddGroupCompanyDTO.self),
+                        response: .type(GetGroupCompanyDTO.self),
+                        auth: .bearer()
+                    )
+                    .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 companies.group(":companyID") { company in
                     company.delete(use: self.removeCompany)
+                        .openAPI(
+                            summary: "Remove group company",
+                            description: "Requires group_company:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                            headers: .type(OrganizationHeaders.self),
+                            responseDescription: "Deleted",
+                            statusCode: 204,
+                            auth: .bearer()
+                        )
+                        .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }
         }

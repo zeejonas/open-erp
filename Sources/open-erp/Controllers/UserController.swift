@@ -1,12 +1,28 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct UserController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let scoped = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("users")
         scoped.get(use: self.index)
+            .openAPI(
+                summary: "List users",
+                description: "Requires organization_user:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(UserListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetUserDTO>.self),
+                auth: .bearer()
+            )
         scoped.group(":userID") { user in
             user.get(use: self.show)
+                .openAPI(
+                    summary: "Get user",
+                    description: "Requires organization_user:read.",
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(GetUserDTO.self),
+                    auth: .bearer()
+                )
         }
     }
 

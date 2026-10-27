@@ -1,10 +1,18 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct PlatformController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let platform = routes.grouped(AuthMiddleware()).grouped("platform")
         platform.post("organizations", use: self.provision)
+            .openAPI(
+                summary: "Provision platform",
+                description: "Requires a platform administrator.",
+                body: .type(ProvisionOrganizationDTO.self),
+                response: .type(ProvisionOrganizationResponse.self),
+                auth: .bearer()
+            )
     }
 
     @Sendable

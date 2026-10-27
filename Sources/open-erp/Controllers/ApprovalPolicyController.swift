@@ -1,19 +1,77 @@
 import Fluent
 import FluentSQL
 import Vapor
+import VaporToOpenAPI
 
 struct ApprovalPolicyController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let scoped = routes.grouped(AuthMiddleware(), OrganizationMiddleware())
         scoped.get("approval-catalog", use: self.catalog)
+            .openAPI(
+                summary: "Get approval catalog",
+                description: "Requires approval_policy:read.",
+                headers: .type(OrganizationHeaders.self),
+                response: .type([ApprovalCatalogEntry].self),
+                auth: .bearer()
+            )
         let policies = scoped.grouped("approval-policies")
         policies.get(use: self.index)
+            .openAPI(
+                summary: "List approval policies",
+                description: "Requires approval_policy:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(ApprovalPolicyListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetApprovalPolicyDTO>.self),
+                auth: .bearer()
+            )
         policies.post(use: self.create)
+            .openAPI(
+                summary: "Create approval policy",
+                description: "Requires approval_policy:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(ApprovalPolicyDefinition.self),
+                response: .type(GetApprovalPolicyDTO.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         policies.group(":policyID") { policy in
             policy.get(use: self.show)
+                .openAPI(
+                    summary: "Get approval policy",
+                    description: "Requires approval_policy:read.",
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(GetApprovalPolicyDTO.self),
+                    auth: .bearer()
+                )
             policy.patch(use: self.update)
+                .openAPI(
+                    summary: "Update approval policy",
+                    description: "Requires approval_policy:update. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    body: .type(ApprovalPolicyDefinition.self),
+                    response: .type(GetApprovalPolicyDTO.self),
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             policy.delete(use: self.delete)
+                .openAPI(
+                    summary: "Delete approval policy",
+                    description: "Requires approval_policy:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             policy.get("versions", use: self.versions)
+                .openAPI(
+                    summary: "List approval policy versions",
+                    description: "Requires approval_policy:read. Newest createdAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                    query: [.type(ListPage.self), .type(NoFilters.self)],
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(Page<GetApprovalPolicyVersionDTO>.self),
+                    auth: .bearer()
+                )
         }
     }
 

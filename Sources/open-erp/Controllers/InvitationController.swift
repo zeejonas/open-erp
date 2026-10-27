@@ -1,15 +1,49 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct InvitationController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         routes.post("invitations", "accept", use: self.accept)
+            .openAPI(
+                summary: "Accept invitation",
+                description: "Requires a bearer access token and a matching verified email from the identity provider; no existing membership is needed.",
+                body: .type(AcceptInvitationDTO.self),
+                response: .type(AcceptInvitationResponse.self),
+                auth: .bearer()
+            )
 
         let invitations = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("organization-invitations")
         invitations.post(use: self.create)
+            .openAPI(
+                summary: "Create invitation",
+                description: "Requires organization_invitation:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(CreateInvitationDTO.self),
+                response: .type(CreateInvitationResponse.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         invitations.get(use: self.index)
+            .openAPI(
+                summary: "List invitations",
+                description: "Requires organization_invitation:read. Newest createdAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(InvitationListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetInvitationDTO>.self),
+                auth: .bearer()
+            )
         invitations.group(":invitationID") { invitation in
             invitation.delete(use: self.revoke)
+                .openAPI(
+                    summary: "Revoke invitation",
+                    description: "Requires organization_invitation:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }
 

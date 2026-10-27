@@ -1,16 +1,59 @@
 import Fluent
 import Vapor
+import VaporToOpenAPI
 
 struct CompanyController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let companies = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("companies")
 
         companies.get(use: self.index)
+            .openAPI(
+                summary: "List companies",
+                description: "Requires company:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(CompanyListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<GetCompanyDTO>.self),
+                auth: .bearer()
+            )
         companies.post(use: self.create)
+            .openAPI(
+                summary: "Create company",
+                description: "Requires company:create. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                headers: .type(OrganizationHeaders.self),
+                body: .type(CreateCompanyDTO.self),
+                response: .type(GetCompanyDTO.self),
+                auth: .bearer()
+            )
+            .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         companies.group(":companyID") { company in
             company.get(use: self.show)
+                .openAPI(
+                    summary: "Get company",
+                    description: "Requires company:read.",
+                    headers: .type(OrganizationHeaders.self),
+                    response: .type(GetCompanyDTO.self),
+                    auth: .bearer()
+                )
             company.patch(use: self.patch)
+                .openAPI(
+                    summary: "Update company",
+                    description: "Requires company:update. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    body: .type(PatchCompanyDTO.self),
+                    response: .type(GetCompanyDTO.self),
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             company.delete(use: self.delete)
+                .openAPI(
+                    summary: "Delete company",
+                    description: "Requires company:delete. Returns 202 with an approval request when approval is required; otherwise applies the change immediately.",
+                    headers: .type(OrganizationHeaders.self),
+                    responseDescription: "Deleted",
+                    statusCode: 204,
+                    auth: .bearer()
+                )
+                .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }
 
