@@ -47,6 +47,14 @@ To execute tests, use the following command:
 swift test
 ```
 
+For Docker, run `docker compose up -d app` after building the image. Compose
+reads the OIDC values from `.env` or your shell and passes them to the app,
+migrate, and revert containers at runtime. `.env` files are excluded from the
+image build context. After changing `.env`, run `docker compose up -d app` again
+to recreate the container with the new values; no image rebuild or terminal
+reload is needed. `docker compose restart` does not reload environment values.
+See [Docker's environment configuration](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
+
 ## API documentation
 
 With the server running, open [Swagger UI](http://localhost:8080/docs).
