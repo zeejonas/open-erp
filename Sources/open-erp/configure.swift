@@ -5,12 +5,22 @@ import Vapor
 
 /// configures your application
 func configure(_ app: Application) async throws {
+    // API setup resets middleware, so it runs before services.
+    try configureAPI(app)
+    try await configureServices(app)
+}
+
+/// Registers the HTTP contract without runtime services or credentials.
+func configureAPI(_ app: Application) throws {
     configureProblemMiddleware(app)
     // Wrap error handling so generated failures receive the same cache policy.
     app.middleware.use(NoStoreMiddleware(), at: .beginning)
-    // uncomment to serve files from /Public folder
-    // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
+    try routes(app)
+    app.asyncCommands.use(ExportOpenAPICommand(), as: "export-openapi")
+}
 
+/// Configures dependencies required by serving and operational commands.
+func configureServices(_ app: Application) async throws {
     app.databases.use(DatabaseConfigurationFactory.postgres(configuration: .init(
         hostname: Environment.get("DATABASE_HOST") ?? "localhost",
         port: Environment.get("DATABASE_PORT").flatMap(Int.init(_:)) ?? SQLPostgresConfiguration.ianaPortNumber,
@@ -47,7 +57,4 @@ func configure(_ app: Application) async throws {
     app.asyncCommands.use(PruneRevokedTokensCommand(), as: "prune-revoked-tokens")
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
     app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")
-
-    // register routes
-    try routes(app)
 }

@@ -67,8 +67,21 @@ on organization endpoints. Requests use the same authentication, membership, per
 and approval checks as any other API client. “Try it out” executes real API requests.
 Approval-controlled writes may return `202` with an approval request instead of applying immediately.
 
+To export the same contract locally without starting a server, configuring OIDC,
+or running Postgres:
+
+```bash
+swift run open-erp export-openapi /tmp/openapi.json
+```
+
+The destination's parent directory must exist. The command atomically writes
+pretty-printed JSON with sorted keys; repeated exports of the same revision are
+byte-identical. Missing arguments and write failures exit unsuccessfully.
+Use the exported file with client generators or other API tooling.
+
 Keep `.openAPI(...)` annotations beside route registrations when adding or changing endpoints.
-Request and response schemas come from the existing DTOs; no generated spec needs to be checked in.
+Request and response schemas come from the existing DTOs. Both `/openapi.json` and
+the export command use the same document builder and API version.
 Approval responses use a synthetic example because their validating decoder cannot be reflected.
 Add `.problemResponses(...)` beside route annotations for applicable failure statuses;
 the helper includes authentication, authorization, and internal failures.

@@ -22,7 +22,11 @@ enum Entrypoint {
         // app.logger.debug("Tried to install SwiftNIO's EventLoopGroup as Swift's global concurrency executor", metadata: ["success": .stringConvertible(executorTakeoverSuccess)])
         
         do {
-            try await configure(app)
+            if env.commandInput.arguments.first == "export-openapi" {
+                try configureAPI(app)
+            } else {
+                try await configure(app)
+            }
             try await app.execute()
         } catch {
             app.logger.report(error: error)

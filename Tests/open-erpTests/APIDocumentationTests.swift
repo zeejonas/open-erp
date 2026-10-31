@@ -9,8 +9,7 @@ struct APIDocumentationTests {
     func documentation() async throws {
         let app = try await Application.make(.testing)
         do {
-            configureProblemMiddleware(app)
-            try routes(app)
+            try configureAPI(app)
             try await app.testing().test(.GET, "docs", afterResponse: { res async throws in
                 #expect(res.status == .ok)
                 #expect(res.headers.contentType == .html)

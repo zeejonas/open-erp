@@ -18,25 +18,29 @@ extension Route {
     }
 }
 
+func apiDocument(_ app: Application) -> OpenAPIObject {
+    app.routes.openAPI(
+        info: InfoObject(
+            title: "open-erp API",
+            description: """
+            Enterprise software without the robbery.
+
+            Use Authorize to enter an OIDC bearer access token. Organization endpoints also
+            require X-Organization-ID and membership with the stated permission. Authentication
+            failures return 401; insufficient access returns 403. Resources outside the selected
+            organization are not accessible.
+
+            Approval-controlled writes return 202 with an approval request when held for review.
+            Otherwise they return the applied resource (200), or an empty response (204) for deletes.
+            """,
+            version: "0.1.0"
+        )
+    )
+}
+
 func registerAPIDocumentation(_ app: Application) {
     app.get("openapi.json") { req in
-        req.application.routes.openAPI(
-            info: InfoObject(
-                title: "open-erp API",
-                description: """
-                Enterprise software without the robbery.
-
-                Use Authorize to enter an OIDC bearer access token. Organization endpoints also
-                require X-Organization-ID and membership with the stated permission. Authentication
-                failures return 401; insufficient access returns 403. Resources outside the selected
-                organization are not accessible.
-
-                Approval-controlled writes return 202 with an approval request when held for review.
-                Otherwise they return the applied resource (200), or an empty response (204) for deletes.
-                """,
-                version: "0.1.0"
-            )
-        )
+        apiDocument(req.application)
     }.excludeFromOpenAPI()
 
     app.get("docs") { _ in
