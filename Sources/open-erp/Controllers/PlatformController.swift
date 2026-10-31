@@ -83,7 +83,7 @@ struct PlatformController: RouteCollection {
             guard organization.onboardedAt == nil, acceptedHistory == 0,
                 let previous = try await OrganizationInvitation.onboarding(organizationID: id, on: db),
                 let groupID = previous.$group.id,
-                try await AccessGroup.query(on: db, organizationID: id).filter(\.$id == groupID).first() != nil
+                try await lockGroup(groupID, organizationID: id, on: db) != nil
             else { throw Abort(.conflict, reason: "Onboarding cannot be reissued") }
             if previous.deletedAt == nil {
                 try await previous.softDelete(by: actorID, \.$deletedBy, on: db)

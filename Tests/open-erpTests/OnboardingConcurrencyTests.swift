@@ -60,6 +60,69 @@ extension OpenERPTests {
         }
     }
 
+    @Test("Postgres serializes expired onboarding recovery with deletion of the original group")
+    func onboardingGroupDeletionRace() async throws {
+        try await withApp { app in
+            let admin = try await createUser(on: app.db, email: "ops@example.com", subject: "ops", isPlatformAdmin: true)
+            let access = try await signAccessToken(on: app, subject: "ops")
+            let sql = try #require(app.db as? any SQLDatabase)
+            try await sql.raw("""
+                CREATE FUNCTION onboarding_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN PERFORM pg_advisory_xact_lock(941027); RETURN NEW; END; $$
+                """).run()
+
+            // Each race pauses one write after it holds the group lock, then starts the other.
+            func race(code: String, trigger: SQLQueryString, recoveryFirst: Bool) async throws -> UUID {
+                let (org, _) = try await raceFixture(app, actor: admin, code: code)
+                let id = try org.requireID()
+                // An expired invitation is not pending, so it alone does not block group deletion.
+                try await sql.raw("UPDATE organization_invitations SET expires_at = now() - interval '1 day' WHERE organization_id = \(bind: id)").run()
+                let groupID = try #require(try await AccessGroup.query(on: app.db, organizationID: id).filter(\.$name == "Original group").first()?.requireID())
+                _ = try await createMember(on: app.db, organizationID: id, email: "\(code)@example.com", subject: code, permissions: [.groupDelete])
+                let tenantAdmin = try await signAccessToken(on: app, subject: code)
+                let deleteGroup = { @Sendable (expected: HTTPStatus) in
+                    _ = try await app.testing().test(.DELETE, "groups/\(groupID)", beforeRequest: {
+                        authorize(&$0, token: tenantAdmin, organizationID: id)
+                    }, afterResponse: { #expect($0.status == expected) })
+                }
+                try await sql.raw(trigger).run()
+                try await withRaceGate(app) { gate in
+                    let first = Task {
+                        if recoveryFirst { _ = try await raceReissue(app, access: access, id: id, expected: .ok) }
+                        else { try await deleteGroup(.noContent) }
+                    }
+                    try await waitForDatabaseLock(sql, advisory: true)
+                    let second = Task {
+                        if recoveryFirst { try await deleteGroup(.conflict) }
+                        else { _ = try await raceReissue(app, access: access, id: id, expected: .conflict) }
+                    }
+                    try await waitForDatabaseLock(sql, advisory: false)
+                    try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
+                    try await first.value
+                    try await second.value
+                }
+                return id
+            }
+
+            let recovered = try await race(
+                code: "KEEP",
+                trigger: "CREATE TRIGGER onboarding_test_gate BEFORE INSERT ON organization_invitations FOR EACH ROW WHEN (NEW.is_onboarding) EXECUTE FUNCTION onboarding_test_gate()",
+                recoveryFirst: true)
+            #expect(try await OrganizationInvitation.pending(on: app.db).filter(\.$organization.$id == recovered).count() == 1)
+            #expect(try await AccessGroup.query(on: app.db, organizationID: recovered).filter(\.$name == "Original group").count() == 1)
+            try await sql.raw("DROP TRIGGER onboarding_test_gate ON organization_invitations").run()
+
+            let deleted = try await race(
+                code: "DROP",
+                trigger: "CREATE TRIGGER onboarding_test_gate BEFORE UPDATE ON groups FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION onboarding_test_gate()",
+                recoveryFirst: false)
+            #expect(try await OrganizationInvitation.query(on: app.db, organizationID: deleted).withDeleted().count() == 1)
+            #expect(try await AccessGroup.query(on: app.db, organizationID: deleted).filter(\.$name == "Original group").count() == 0)
+            try await sql.raw("DROP TRIGGER onboarding_test_gate ON groups").run()
+            try await sql.raw("DROP FUNCTION onboarding_test_gate()").run()
+        }
+    }
+
     @Test("Reissue during external userinfo fetch rejects the stale token without membership")
     func onboardingUserInfoRace() async throws {
         try await withApp { app in
@@ -76,8 +139,8 @@ extension OpenERPTests {
                 return UserInfo(email: "recipient@example.com", emailVerified: true)
             }
             let acceptance = Task { try await raceAccept(app, access: recipient, token: initial, expected: .notFound) }
-            await entered.wait()
             do {
+                try await waitForSignal(entered)
                 let replacement = try #require(try await raceReissue(app, access: access, id: id, expected: .ok))
                 await release.signal()
                 try await acceptance.value
@@ -96,7 +159,7 @@ extension OpenERPTests {
 }
 
 private actor RaceSignal {
-    private var signaled = false
+    private(set) var signaled = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     func wait() async {
         if signaled { return }
@@ -160,11 +223,19 @@ private func waitForDatabaseLock(_ sql: any SQLDatabase, advisory: Bool) async t
     while Date() < deadline {
         let query: SQLQueryString = advisory
             ? "SELECT count(*) AS total FROM pg_locks WHERE locktype = 'advisory' AND objid = 941027 AND NOT granted"
-            : "SELECT count(*) AS total FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE%'"
+            : "SELECT count(*) AS total FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ~ 'FOR (NO KEY )?UPDATE'"
         let row = try #require(try await sql.raw(query).first())
         if try row.decode(column: "total", as: Int.self) > 0 { return }
         try await Task.sleep(for: .milliseconds(10))
     }
     throw LockWaitTimedOut()
+}
+/// Bounded so a request that never reaches the barrier fails instead of hanging.
+private func waitForSignal(_ signal: RaceSignal) async throws {
+    let deadline = Date().addingTimeInterval(10)
+    while await !signal.signaled {
+        guard Date() < deadline else { throw LockWaitTimedOut() }
+        try await Task.sleep(for: .milliseconds(10))
+    }
 }
 private struct LockWaitTimedOut: Error {}

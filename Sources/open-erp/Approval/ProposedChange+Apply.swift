@@ -74,7 +74,10 @@ extension ProposedChange {
             let group = try await requireGroup(id, organizationID: organizationID, on: db)
             try throwIfStale(before.name != after.name && group.name != before.name)
         case .groupDelete(let id, _):
-            let group = try await requireGroup(id, organizationID: organizationID, on: db)
+            // Locked so onboarding recovery cannot issue an invitation into the group while it is deleted.
+            guard let group = try await lockGroup(id, organizationID: organizationID, on: db) else {
+                throw Abort(.notFound)
+            }
             if try await policyUsesGroup(id, on: db) {
                 throw Abort(.conflict, reason: "Group is an approver pool for an active approval policy")
             }

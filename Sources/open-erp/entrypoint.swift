@@ -7,8 +7,11 @@ import NIOPosix
 enum Entrypoint {
     static func main() async throws {
         var env = try Environment.detect()
-        try LoggingSystem.bootstrap(from: &env)
-        
+        try LoggingSystem.bootstrap(from: &env) { level in
+            let console = Terminal()
+            return { label in RedactingLogHandler(base: ConsoleLogger(label: label, console: console, level: level)) }
+        }
+
         let app = try await Application.make(env)
 
         // This attempts to install NIO as the Swift Concurrency global executor.

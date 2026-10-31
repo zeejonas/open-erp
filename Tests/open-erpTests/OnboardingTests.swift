@@ -69,6 +69,40 @@ extension OpenERPTests {
     }
 }
 
+extension OpenERPTests {
+    @Test("Query logging never emits invitation tokens or their hashes")
+    func invitationQueryLogsRedactBinds() async throws {
+        try await withApp { app in
+            let capture = CapturingLogHandler()
+            app.logger = Logger(label: "test") { _ in RedactingLogHandler(base: capture) }
+            let org = try await createOrganization(on: app.db, code: "LOGS", name: "Log tenant")
+            let (invitation, token) = try await OrganizationInvitation.issue(
+                organizationID: try org.requireID(), email: "first@logs.com", firstName: "First", lastName: "Admin",
+                groupID: nil, createdByID: nil, on: app.db)
+            // Acceptance looks the invitation up by its hash.
+            _ = try await OrganizationInvitation.query(on: app.db).filter(\.$tokenHash == invitation.tokenHash).first()
+            let lines = capture.lines
+            #expect(lines.contains { $0.contains("organization_invitations") && $0.contains("[redacted]") })
+            #expect(!lines.contains { $0.contains(invitation.tokenHash) || $0.contains(token) })
+        }
+    }
+}
+
+private final class CapturingLogHandler: LogHandler, @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: [String] = []
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] }
+        set { metadata[key] = newValue }
+    }
+    var lines: [String] { lock.withLock { captured } }
+    func log(event: LogEvent) {
+        lock.withLock { captured.append("\(event.message) \(event.metadata ?? [:])") }
+    }
+}
+
 private func acceptOnboarding(_ app: Application, access: String, invitation: String, status: HTTPStatus) async throws {
     try await app.testing().test(.POST, "invitations/accept", beforeRequest: { req in
         authorize(&req, token: access)
