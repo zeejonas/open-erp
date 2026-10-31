@@ -12,6 +12,7 @@ struct InvitationController: RouteCollection {
                 response: .type(AcceptInvitationResponse.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict, .badGateway)
 
         let invitations = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("organization-invitations")
         invitations.post(use: self.create)
@@ -23,6 +24,7 @@ struct InvitationController: RouteCollection {
                 response: .type(CreateInvitationResponse.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         invitations.get(use: self.index)
             .openAPI(
@@ -33,6 +35,7 @@ struct InvitationController: RouteCollection {
                 response: .type(Page<GetInvitationDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         invitations.group(":invitationID") { invitation in
             invitation.delete(use: self.revoke)
                 .openAPI(
@@ -43,6 +46,7 @@ struct InvitationController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }

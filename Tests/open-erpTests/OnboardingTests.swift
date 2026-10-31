@@ -100,7 +100,7 @@ extension OpenERPTests {
     }
 }
 
-private struct CapturingLogHandler: LogHandler {
+struct CapturingLogHandler: LogHandler {
     private let capture = CapturedLogs()
     var metadata: Logger.Metadata = [:]
     var logLevel: Logger.Level = .trace

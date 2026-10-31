@@ -11,6 +11,7 @@ struct MeController: RouteCollection {
                 response: .type(GetUserDTO.self),
                 auth: .bearer()
             )
+            .problemResponses()
         authed.patch("me", use: self.patch)
             .openAPI(
                 summary: "Update me",
@@ -18,6 +19,7 @@ struct MeController: RouteCollection {
                 response: .type(GetUserDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType)
         authed.get("me", "organizations", use: self.organizations)
             .openAPI(
                 summary: "List my organizations",
@@ -26,6 +28,7 @@ struct MeController: RouteCollection {
                 response: .type(Page<GetOrganizationDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
     }
 
     @Sendable

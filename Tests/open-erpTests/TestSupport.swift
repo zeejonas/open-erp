@@ -157,11 +157,9 @@ func authorizedGet(
 
 func expectBadRequest(_ response: TestingHTTPResponse, naming parameter: String) throws {
     #expect(response.status == .badRequest)
-    struct ErrorBody: Content {
-        var reason: String
-    }
-    let body = try response.content.decode(ErrorBody.self)
-    #expect(body.reason.contains(parameter), "\(body.reason) should name \(parameter)")
+    let body = try response.content.decode(Problem.self, as: .json)
+    #expect(body.code == .badRequest)
+    #expect(body.detail.contains(parameter), "\(body.detail) should name \(parameter)")
 }
 
 func stubUserInfo(_ app: Application, email: String, emailVerified: Bool) {

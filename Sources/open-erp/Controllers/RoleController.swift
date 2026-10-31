@@ -14,6 +14,7 @@ struct RoleController: RouteCollection {
                 response: .type(GetRoleDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         roles.get(use: self.index)
             .openAPI(
@@ -24,6 +25,7 @@ struct RoleController: RouteCollection {
                 response: .type(Page<GetRoleDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         roles.group(":roleID") { role in
             role.get(use: self.show)
                 .openAPI(
@@ -33,6 +35,7 @@ struct RoleController: RouteCollection {
                     response: .type(GetRoleDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
             role.patch(use: self.patch)
                 .openAPI(
                     summary: "Update role",
@@ -42,6 +45,7 @@ struct RoleController: RouteCollection {
                     response: .type(GetRoleDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             role.delete(use: self.delete)
                 .openAPI(
@@ -52,6 +56,7 @@ struct RoleController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }

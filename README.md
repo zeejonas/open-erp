@@ -70,9 +70,50 @@ Approval-controlled writes may return `202` with an approval request instead of 
 Keep `.openAPI(...)` annotations beside route registrations when adding or changing endpoints.
 Request and response schemas come from the existing DTOs; no generated spec needs to be checked in.
 Approval responses use a synthetic example because their validating decoder cannot be reflected.
+Add `.problemResponses(...)` beside route annotations for applicable failure statuses;
+the helper includes authentication, authorization, and internal failures.
 See [VaporToOpenAPI](https://github.com/dankinsoid/VaporToOpenAPI),
 [Vapor routing](https://docs.vapor.codes/basics/routing/), and
 [Swagger UI installation](https://swagger.io/docs/open-source-tools/swagger-ui/usage/installation/).
+
+## API errors
+
+Application errors use [RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457.html)
+with `Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:open-erp:problem:invalid_access_token",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "Unauthorized",
+  "code": "invalid_access_token"
+}
+```
+
+Branch on `code` and HTTP status, not text in `title` or `detail`. The body status
+matches the HTTP status; `type` is always `urn:open-erp:problem:<code>`.
+
+| HTTP status | Code | Client action |
+| --- | --- | --- |
+| 400 | `bad_request` | Correct the named input or tenant header. |
+| 401 | `unauthorized` | Supply a bearer access token. |
+| 401 | `invalid_access_token` | Obtain a valid access token; verification rejected the supplied token. |
+| 403 | `forbidden` | Check membership and permissions; repeating the request cannot grant access. |
+| 404 | `not_found` | Check the route or resource within the selected organization. |
+| 409 | `conflict` | Reload the resource and resolve the conflicting state. |
+| 413 | `payload_too_large` | Reduce the request body size. |
+| 415 | `unsupported_media_type` | Use the endpoint's documented request media type. |
+| 429 | `too_many_requests` | Back off; respect `Retry-After` when present. |
+| Any 5xx | `internal_error` | Retry as appropriate for the operation; contact the operator if it persists. |
+| Other error statuses | `http_error` | Handle according to the HTTP status. |
+
+Every 401 includes an [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750#section-3.1) Bearer
+`WWW-Authenticate` challenge: `Bearer error="invalid_token"` for a rejected token, plain
+`Bearer` when no token was sent. Applicable error headers
+are preserved. Internal error details are generic in all environments. Unknown
+organizations and organizations without membership return the same generic 403.
+New explicit codes require documented recovery semantics and tests.
 
 ### See more
 

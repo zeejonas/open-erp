@@ -14,6 +14,7 @@ struct ApprovalPolicyController: RouteCollection {
                 response: .type([ApprovalCatalogEntry].self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         let policies = scoped.grouped("approval-policies")
         policies.get(use: self.index)
             .openAPI(
@@ -24,6 +25,7 @@ struct ApprovalPolicyController: RouteCollection {
                 response: .type(Page<GetApprovalPolicyDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         policies.post(use: self.create)
             .openAPI(
                 summary: "Create approval policy",
@@ -33,6 +35,7 @@ struct ApprovalPolicyController: RouteCollection {
                 response: .type(GetApprovalPolicyDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         policies.group(":policyID") { policy in
             policy.get(use: self.show)
@@ -43,6 +46,7 @@ struct ApprovalPolicyController: RouteCollection {
                     response: .type(GetApprovalPolicyDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
             policy.patch(use: self.update)
                 .openAPI(
                     summary: "Update approval policy",
@@ -52,6 +56,7 @@ struct ApprovalPolicyController: RouteCollection {
                     response: .type(GetApprovalPolicyDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             policy.delete(use: self.delete)
                 .openAPI(
@@ -62,6 +67,7 @@ struct ApprovalPolicyController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             policy.get("versions", use: self.versions)
                 .openAPI(
@@ -72,6 +78,7 @@ struct ApprovalPolicyController: RouteCollection {
                     response: .type(Page<GetApprovalPolicyVersionDTO>.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
         }
     }
 

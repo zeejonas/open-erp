@@ -1312,10 +1312,6 @@ private func requireStatus(_ response: TestingHTTPResponse, _ status: HTTPStatus
     }
 }
 
-private struct FailureBody: Content {
-    var reason: String
-}
-
 private func failureReason(_ response: TestingHTTPResponse) throws -> String {
-    try response.content.decode(FailureBody.self).reason
+    try response.content.decode(Problem.self, as: .json).detail
 }

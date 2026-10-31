@@ -9,6 +9,7 @@ struct APIDocumentationTests {
     func documentation() async throws {
         let app = try await Application.make(.testing)
         do {
+            configureProblemMiddleware(app)
             try routes(app)
             try await app.testing().test(.GET, "docs", afterResponse: { res async throws in
                 #expect(res.status == .ok)
@@ -37,6 +38,15 @@ struct APIDocumentationTests {
                     #expect(operation["security"] != nil)
                     let responses = try #require(operation["responses"] as? [String: [String: Any]], "Missing responses: \(path)")
                     #expect(!responses.isEmpty)
+                    for status in ["401", "403", "500"] {
+                        #expect(responses[status] != nil, "Missing problem response \(status): \(path)")
+                    }
+                    for (status, response) in responses where (Int(status) ?? 0) >= 400 {
+                        let content = try #require(response["content"] as? [String: [String: Any]])
+                        #expect(Set(content.keys) == ["application/problem+json"])
+                        let schema = try #require(content["application/problem+json"]?["schema"] as? [String: Any])
+                        #expect(schema["$ref"] as? String == "#/components/schemas/Problem")
+                    }
                     if route.method != .DELETE {
                         #expect(responses["200"]?["content"] != nil, "Missing response schema: \(path)")
                     }
@@ -65,6 +75,8 @@ struct APIDocumentationTests {
                 let responses = try #require(create["responses"] as? [String: Any])
                 #expect(responses["200"] != nil)
                 #expect(responses["202"] != nil)
+                for status in ["400", "409", "413", "415"] { #expect(responses[status] != nil) }
+                #expect((paths["/companies/{companyID}"]?["get"]?["responses"] as? [String: Any])?["404"] != nil)
                 let deletion = try #require(paths["/companies/{companyID}"]?["delete"]?["responses"] as? [String: [String: Any]])
                 #expect(deletion["204"] != nil)
                 #expect(deletion["204"]?["content"] == nil)
@@ -72,6 +84,10 @@ struct APIDocumentationTests {
 
                 let components = try #require(document["components"] as? [String: Any])
                 let schemas = try #require(components["schemas"] as? [String: [String: Any]])
+                let problem = try #require(schemas["Problem"])
+                let properties = try #require(problem["properties"] as? [String: Any])
+                #expect(Set(properties.keys) == ["type", "title", "status", "detail", "code"])
+                #expect(Set(problem["required"] as? [String] ?? []) == Set(properties.keys))
                 let approval = try #require(schemas["GetApprovalRequestDTO"]?["properties"] as? [String: Any])
                 #expect(Set(approval.keys) == ["id", "permission", "targetId", "status", "failureReason", "requestedBy", "change", "tracks", "decisions", "createdAt", "updatedAt", "invitation"])
 
@@ -94,8 +110,10 @@ struct APIDocumentationTests {
             })
             for path in ["me", "companies", "platform/organizations", "invitations/accept"] {
                 let method: HTTPMethod = ["platform/organizations", "invitations/accept"].contains(path) ? .POST : .GET
-                try await app.testing().test(method, path, afterResponse: { res async in
+                try await app.testing().test(method, path, afterResponse: { res async throws in
                     #expect(res.status == .unauthorized)
+                    #expect(try res.content.decode(Problem.self, as: .json).code == .unauthorized)
+                    #expect(res.headers[.wwwAuthenticate] == ["Bearer"])
                 })
             }
         } catch {

@@ -15,6 +15,7 @@ struct OrganizationUserController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }

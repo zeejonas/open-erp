@@ -14,6 +14,7 @@ struct ApprovalRequestController: RouteCollection {
                 response: .type(of: Page(items: [GetApprovalRequestDTO.example], metadata: .init(page: 1, per: 25, total: 1))),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         requests.group(":requestID") { approval in
             approval.get(use: self.show)
                 .openAPI(
@@ -23,6 +24,7 @@ struct ApprovalRequestController: RouteCollection {
                     response: .type(GetApprovalRequestDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
             approval.post("approve", use: self.approve)
                 .openAPI(
                     summary: "Approve approval request",
@@ -31,6 +33,7 @@ struct ApprovalRequestController: RouteCollection {
                     response: .type(GetApprovalRequestDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
             approval.post("reject", use: self.reject)
                 .openAPI(
                     summary: "Reject approval request",
@@ -40,6 +43,7 @@ struct ApprovalRequestController: RouteCollection {
                     response: .type(GetApprovalRequestDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
             approval.post("withdraw", use: self.withdraw)
                 .openAPI(
                     summary: "Withdraw approval request",
@@ -48,6 +52,7 @@ struct ApprovalRequestController: RouteCollection {
                     response: .type(GetApprovalRequestDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
             approval.post("override", use: self.override)
                 .openAPI(
                     summary: "Override approval request",
@@ -57,6 +62,7 @@ struct ApprovalRequestController: RouteCollection {
                     response: .type(GetApprovalRequestDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
         }
     }
 

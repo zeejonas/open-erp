@@ -14,6 +14,7 @@ struct UserController: RouteCollection {
                 response: .type(Page<GetUserDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         scoped.group(":userID") { user in
             user.get(use: self.show)
                 .openAPI(
@@ -23,6 +24,7 @@ struct UserController: RouteCollection {
                     response: .type(GetUserDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
         }
     }
 

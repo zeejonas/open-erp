@@ -15,6 +15,7 @@ struct CompanyController: RouteCollection {
                 response: .type(Page<GetCompanyDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         companies.post(use: self.create)
             .openAPI(
                 summary: "Create company",
@@ -24,6 +25,7 @@ struct CompanyController: RouteCollection {
                 response: .type(GetCompanyDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         companies.group(":companyID") { company in
             company.get(use: self.show)
@@ -34,6 +36,7 @@ struct CompanyController: RouteCollection {
                     response: .type(GetCompanyDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
             company.patch(use: self.patch)
                 .openAPI(
                     summary: "Update company",
@@ -43,6 +46,7 @@ struct CompanyController: RouteCollection {
                     response: .type(GetCompanyDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             company.delete(use: self.delete)
                 .openAPI(
@@ -53,6 +57,7 @@ struct CompanyController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
     }

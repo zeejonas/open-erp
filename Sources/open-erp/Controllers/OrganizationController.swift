@@ -13,6 +13,7 @@ struct OrganizationController: RouteCollection {
                 response: .type(GetOrganizationDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .notFound)
         scoped.patch("organization", use: self.patch)
             .openAPI(
                 summary: "Update organization",
@@ -22,6 +23,7 @@ struct OrganizationController: RouteCollection {
                 response: .type(GetOrganizationDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         scoped.delete("organization", use: self.delete)
             .openAPI(
@@ -32,6 +34,7 @@ struct OrganizationController: RouteCollection {
                 statusCode: 204,
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .notFound, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
     }
 

@@ -60,26 +60,38 @@ extension OpenERPTests {
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in
                 authorize(&req, token: ada, organizationID: orgBID)
-            }, afterResponse: { res async in
+            }, afterResponse: { res async throws in
                 #expect(res.status == .forbidden)
+                let problem = try res.content.decode(Problem.self, as: .json)
+                #expect(problem.code == .forbidden)
+                #expect(problem.detail == "Forbidden")
             })
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in
                 authorize(&req, token: ada, organizationID: UUID())
-            }, afterResponse: { res async in
+            }, afterResponse: { res async throws in
                 #expect(res.status == .forbidden)
+                let problem = try res.content.decode(Problem.self, as: .json)
+                #expect(problem.code == .forbidden)
+                #expect(problem.detail == "Forbidden")
             })
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in
                 authorize(&req, token: bea, organizationID: orgBID)
-            }, afterResponse: { res async in
+            }, afterResponse: { res async throws in
                 #expect(res.status == .forbidden)
+                let problem = try res.content.decode(Problem.self, as: .json)
+                #expect(problem.code == .forbidden)
+                #expect(problem.detail == "Forbidden")
             })
 
             try await app.testing().test(.GET, "companies", beforeRequest: { req in
                 authorize(&req, token: ada, organizationID: deletedID)
-            }, afterResponse: { res async in
+            }, afterResponse: { res async throws in
                 #expect(res.status == .forbidden)
+                let problem = try res.content.decode(Problem.self, as: .json)
+                #expect(problem.code == .forbidden)
+                #expect(problem.detail == "Forbidden")
             })
 
             _ = user

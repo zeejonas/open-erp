@@ -1,6 +1,22 @@
 import Vapor
 import VaporToOpenAPI
 
+extension Route {
+    /// Every authenticated operation can fail authentication, authorization, or internally.
+    @discardableResult
+    func problemResponses(_ statuses: HTTPStatus...) -> Route {
+        for status in [HTTPStatus.unauthorized, .forbidden, .internalServerError] + statuses {
+            response(
+                statusCode: .code(Int(status.code)),
+                body: .type(Problem.self),
+                contentType: .init(HTTPMediaType.problemJSON.serialize()),
+                description: status.reasonPhrase
+            )
+        }
+        return self
+    }
+}
+
 func registerAPIDocumentation(_ app: Application) {
     app.get("openapi.json") { req in
         req.application.routes.openAPI(

@@ -13,11 +13,12 @@ struct PlatformController: RouteCollection {
                 response: .type(ProvisionOrganizationResponse.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
         platform.post("organizations", ":organizationID", "admin-invitation", "reissue", use: self.reissue)
             .openAPI(summary: "Reissue administrator invitation",
                 description: "Platform administrator only. No body or recipient changes. Replaces incomplete onboarding with a seven-day token returned once. 409 for completed/unavailable onboarding or an unavailable original group. Cache-Control: no-store.",
                 response: .type(ProvisionOrganizationResponse.self), auth: .bearer())
-            .response(statusCode: 409, description: "Completed/unavailable onboarding or original group unavailable")
+            .problemResponses(.badRequest, .notFound, .conflict)
     }
 
     @Sendable

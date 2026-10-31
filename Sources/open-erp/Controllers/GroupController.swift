@@ -14,6 +14,7 @@ struct GroupController: RouteCollection {
                 response: .type(GetGroupDTO.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
             .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         groups.get(use: self.index)
             .openAPI(
@@ -24,6 +25,7 @@ struct GroupController: RouteCollection {
                 response: .type(Page<GetGroupDTO>.self),
                 auth: .bearer()
             )
+            .problemResponses(.badRequest)
         groups.group(":groupID") { group in
             group.get(use: self.show)
                 .openAPI(
@@ -33,6 +35,7 @@ struct GroupController: RouteCollection {
                     response: .type(GetGroupDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound)
             group.patch(use: self.patch)
                 .openAPI(
                     summary: "Update group",
@@ -42,6 +45,7 @@ struct GroupController: RouteCollection {
                     response: .type(GetGroupDTO.self),
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             group.delete(use: self.delete)
                 .openAPI(
@@ -52,6 +56,7 @@ struct GroupController: RouteCollection {
                     statusCode: 204,
                     auth: .bearer()
                 )
+                .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
             group.group("members") { members in
                 members.post(use: self.addMember)
@@ -63,6 +68,7 @@ struct GroupController: RouteCollection {
                         response: .type(GetGroupMemberDTO.self),
                         auth: .bearer()
                     )
+                    .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                     .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 members.get(use: self.listMembers)
                     .openAPI(
@@ -73,6 +79,7 @@ struct GroupController: RouteCollection {
                         response: .type(Page<GetGroupMemberDTO>.self),
                         auth: .bearer()
                     )
+                    .problemResponses(.badRequest, .notFound)
                 members.group(":userID") { member in
                     member.delete(use: self.removeMember)
                         .openAPI(
@@ -83,6 +90,7 @@ struct GroupController: RouteCollection {
                             statusCode: 204,
                             auth: .bearer()
                         )
+                        .problemResponses(.badRequest, .notFound, .conflict)
                         .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }
@@ -96,6 +104,7 @@ struct GroupController: RouteCollection {
                         response: .type(GetGroupRoleDTO.self),
                         auth: .bearer()
                     )
+                    .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                     .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 roles.group(":roleID") { role in
                     role.delete(use: self.removeRole)
@@ -107,6 +116,7 @@ struct GroupController: RouteCollection {
                             statusCode: 204,
                             auth: .bearer()
                         )
+                        .problemResponses(.badRequest, .notFound, .conflict)
                         .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }
@@ -120,6 +130,7 @@ struct GroupController: RouteCollection {
                         response: .type(GetGroupCompanyDTO.self),
                         auth: .bearer()
                     )
+                    .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
                     .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 companies.group(":companyID") { company in
                     company.delete(use: self.removeCompany)
@@ -131,6 +142,7 @@ struct GroupController: RouteCollection {
                             statusCode: 204,
                             auth: .bearer()
                         )
+                        .problemResponses(.badRequest, .notFound, .conflict)
                         .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
                 }
             }

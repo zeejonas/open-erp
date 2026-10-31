@@ -5,6 +5,7 @@ import Vapor
 
 /// configures your application
 func configure(_ app: Application) async throws {
+    configureProblemMiddleware(app)
     // uncomment to serve files from /Public folder
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 

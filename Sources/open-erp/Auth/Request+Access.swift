@@ -44,17 +44,18 @@ extension Request {
 
     /// Verifies the bearer token. Signature, issuer, audience, and expiry failures are `401`.
     func verifiedAccessToken() async throws -> AccessToken {
+        guard let bearer = headers.bearerAuthorization?.token else {
+            throw Abort(.unauthorized)
+        }
         let token: AccessToken
         do {
-            token = try await jwt.verify(as: AccessToken.self)
-        } catch let abort as any AbortError {
-            throw abort
+            token = try await jwt.verify(bearer, as: AccessToken.self)
         } catch {
-            throw Abort(.unauthorized)
+            throw ProblemAbort(status: .unauthorized, code: .invalidAccessToken)
         }
         let oidc = application.oidc
         guard token.issuer.value == oidc.issuer, token.audience.value.contains(oidc.audience) else {
-            throw Abort(.unauthorized)
+            throw ProblemAbort(status: .unauthorized, code: .invalidAccessToken)
         }
         return token
     }
