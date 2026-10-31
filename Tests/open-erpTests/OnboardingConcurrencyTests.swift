@@ -5,31 +5,37 @@ import Testing
 import VaporTesting
 
 extension OpenERPTests {
+    @Test("A failed race fixture removes its function and triggers before the next run")
+    func onboardingRaceFixtureCleanup() async throws {
+        do {
+            try await withOnboardingRaceApp { app in
+                let sql = try #require(app.db as? any SQLDatabase)
+                try await sql.raw("CREATE TRIGGER onboarding_test_gate BEFORE INSERT ON organization_invitations FOR EACH ROW EXECUTE FUNCTION onboarding_test_gate()").run()
+                throw CancellationError()
+            }
+            Issue.record("Expected the injected fixture failure")
+        } catch is CancellationError {}
+        // Creating the same function again fails if error-path cleanup left it behind.
+        try await withOnboardingRaceApp { _ in }
+    }
+
     @Test("Postgres serializes acceptance-first and concurrent onboarding reissues")
     func onboardingDatabaseRaces() async throws {
-        try await withApp { app in
+        try await withOnboardingRaceApp { app in
             let admin = try await createUser(on: app.db, email: "ops@example.com", subject: "ops", isPlatformAdmin: true)
             let access = try await signAccessToken(on: app, subject: "ops")
             let recipient = try await signAccessToken(on: app, subject: "recipient")
             let sql = try #require(app.db as? any SQLDatabase)
             // These triggers are only test barriers. They pause a write after its organization lock.
-            try await sql.raw("""
-                CREATE FUNCTION onboarding_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN PERFORM pg_advisory_xact_lock(941027); RETURN NEW; END; $$
-                """).run()
             try await sql.raw("CREATE TRIGGER onboarding_test_gate BEFORE UPDATE ON organizations FOR EACH ROW WHEN (NEW.onboarded_at IS NOT NULL) EXECUTE FUNCTION onboarding_test_gate()").run()
             let (org, initial) = try await raceFixture(app, actor: admin, code: "RACE")
             let id = try org.requireID()
             stubUserInfo(app, email: "recipient@example.com", emailVerified: true)
-            try await withRaceGate(app) { gate in
-                let acceptance = Task { try await raceAccept(app, access: recipient, token: initial, expected: .ok) }
-                try await waitForDatabaseLock(sql, advisory: true)
-                let reissue = Task { try await raceReissue(app, access: access, id: id, expected: .conflict) }
-                try await waitForDatabaseLock(sql, advisory: false)
-                try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
-                try await acceptance.value
-                _ = try await reissue.value
-            }
+            _ = try await runDatabaseRace(app, first: {
+                try await raceAccept(app, access: recipient, token: initial, expected: .ok)
+            }, second: {
+                try await raceReissue(app, access: access, id: id, expected: .conflict)
+            })
             #expect(try await Organization.find(id, on: app.db)?.onboardedAt != nil)
             #expect(try await OrganizationInvitation.query(on: app.db, organizationID: id).withDeleted().count() == 1)
             try await sql.raw("DROP TRIGGER onboarding_test_gate ON organizations").run()
@@ -37,14 +43,11 @@ extension OpenERPTests {
             let (second, _) = try await raceFixture(app, actor: admin, code: "TWIN")
             let secondID = try second.requireID()
             try await sql.raw("CREATE TRIGGER onboarding_test_gate BEFORE INSERT ON organization_invitations FOR EACH ROW WHEN (NEW.is_onboarding) EXECUTE FUNCTION onboarding_test_gate()").run()
-            let replacements = try await withRaceGate(app) { gate in
-                let first = Task { try await raceReissue(app, access: access, id: secondID, expected: .ok) }
-                try await waitForDatabaseLock(sql, advisory: true)
-                let last = Task { try await raceReissue(app, access: access, id: secondID, expected: .ok) }
-                try await waitForDatabaseLock(sql, advisory: false)
-                try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
-                return try await (first.value, last.value)
-            }
+            let replacements = try await runDatabaseRace(app, first: {
+                try await raceReissue(app, access: access, id: secondID, expected: .ok)
+            }, second: {
+                try await raceReissue(app, access: access, id: secondID, expected: .ok)
+            })
             let first = try #require(replacements.0)
             let last = try #require(replacements.1)
             try await raceAccept(app, access: recipient, token: first.invitationToken, expected: .notFound)
@@ -56,20 +59,15 @@ extension OpenERPTests {
             #expect(history.allSatisfy { $0.$createdBy.id == admin.id })
             #expect(history.filter { $0.deletedAt != nil }.allSatisfy { $0.$deletedBy.id == admin.id })
             try await sql.raw("DROP TRIGGER onboarding_test_gate ON organization_invitations").run()
-            try await sql.raw("DROP FUNCTION onboarding_test_gate()").run()
         }
     }
 
     @Test("Postgres serializes expired onboarding recovery with deletion of the original group")
     func onboardingGroupDeletionRace() async throws {
-        try await withApp { app in
+        try await withOnboardingRaceApp { app in
             let admin = try await createUser(on: app.db, email: "ops@example.com", subject: "ops", isPlatformAdmin: true)
             let access = try await signAccessToken(on: app, subject: "ops")
             let sql = try #require(app.db as? any SQLDatabase)
-            try await sql.raw("""
-                CREATE FUNCTION onboarding_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN PERFORM pg_advisory_xact_lock(941027); RETURN NEW; END; $$
-                """).run()
 
             // Each race pauses one write after it holds the group lock, then starts the other.
             func race(code: String, trigger: SQLQueryString, recoveryFirst: Bool) async throws -> UUID {
@@ -86,21 +84,13 @@ extension OpenERPTests {
                     }, afterResponse: { #expect($0.status == expected) })
                 }
                 try await sql.raw(trigger).run()
-                try await withRaceGate(app) { gate in
-                    let first = Task {
-                        if recoveryFirst { _ = try await raceReissue(app, access: access, id: id, expected: .ok) }
-                        else { try await deleteGroup(.noContent) }
-                    }
-                    try await waitForDatabaseLock(sql, advisory: true)
-                    let second = Task {
-                        if recoveryFirst { try await deleteGroup(.conflict) }
-                        else { _ = try await raceReissue(app, access: access, id: id, expected: .conflict) }
-                    }
-                    try await waitForDatabaseLock(sql, advisory: false)
-                    try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
-                    try await first.value
-                    try await second.value
-                }
+                _ = try await runDatabaseRace(app, first: {
+                    if recoveryFirst { _ = try await raceReissue(app, access: access, id: id, expected: .ok) }
+                    else { try await deleteGroup(.noContent) }
+                }, second: {
+                    if recoveryFirst { try await deleteGroup(.conflict) }
+                    else { _ = try await raceReissue(app, access: access, id: id, expected: .conflict) }
+                })
                 return id
             }
 
@@ -119,7 +109,6 @@ extension OpenERPTests {
             #expect(try await OrganizationInvitation.query(on: app.db, organizationID: deleted).withDeleted().count() == 1)
             #expect(try await AccessGroup.query(on: app.db, organizationID: deleted).filter(\.$name == "Original group").count() == 0)
             try await sql.raw("DROP TRIGGER onboarding_test_gate ON groups").run()
-            try await sql.raw("DROP FUNCTION onboarding_test_gate()").run()
         }
     }
 
@@ -201,17 +190,47 @@ private func raceReissue(_ app: Application, access: String, id: UUID, expected:
     return result
 }
 
-private func withRaceGate<T: Sendable>(_ app: Application, _ body: @escaping @Sendable (any SQLDatabase) async throws -> T) async throws -> T {
-    try await app.db.withConnection { connection in
-        let sql = try #require(connection as? any SQLDatabase)
-        try await sql.raw("SELECT pg_advisory_lock(941027)").run()
+/// Remove the function and its triggers before withApp reverts the tables, including on failure.
+private func withOnboardingRaceApp(_ body: (Application) async throws -> Void) async throws {
+    try await withApp { app in
+        let sql = try #require(app.db as? any SQLDatabase)
+        try await sql.raw("""
+            CREATE FUNCTION onboarding_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN PERFORM pg_advisory_xact_lock(941027); RETURN NEW; END; $$
+            """).run()
         do {
-            let value = try await body(sql)
-            // Harmless if the body already released the gate.
-            try await sql.raw("SELECT pg_advisory_unlock(941027)").run()
-            return value
+            try await body(app)
         } catch {
-            try await sql.raw("SELECT pg_advisory_unlock(941027)").run()
+            try? await sql.raw("DROP FUNCTION onboarding_test_gate() CASCADE").run()
+            throw error
+        }
+        try await sql.raw("DROP FUNCTION onboarding_test_gate() CASCADE").run()
+    }
+}
+
+/// Release the gate and join both requests before fixture cleanup, even when a barrier times out.
+private func runDatabaseRace<First: Sendable, Second: Sendable>(
+    _ app: Application,
+    first: @escaping @Sendable () async throws -> First,
+    second: @escaping @Sendable () async throws -> Second
+) async throws -> (First, Second) {
+    try await app.db.withConnection { connection in
+        let gate = try #require(connection as? any SQLDatabase)
+        let sql = try #require(app.db as? any SQLDatabase)
+        try await gate.raw("SELECT pg_advisory_lock(941027)").run()
+        let firstTask = Task { try await first() }
+        var secondTask: Task<Second, any Error>?
+        do {
+            try await waitForDatabaseLock(sql, advisory: true)
+            let last = Task { try await second() }
+            secondTask = last
+            try await waitForDatabaseLock(sql, advisory: false)
+            try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
+            return try await (firstTask.value, last.value)
+        } catch {
+            try await gate.raw("SELECT pg_advisory_unlock(941027)").run()
+            _ = try? await firstTask.value
+            _ = try? await secondTask?.value
             throw error
         }
     }

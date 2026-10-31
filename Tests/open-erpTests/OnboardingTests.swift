@@ -70,6 +70,18 @@ extension OpenERPTests {
 }
 
 extension OpenERPTests {
+    @Test("Captured loggers keep metadata and log levels independent")
+    func capturingLoggerValueSemantics() {
+        let first = Logger(label: "capture") { _ in CapturingLogHandler() }
+        var second = first
+        second.logLevel = .error
+        second[metadataKey: "copy"] = "second"
+        #expect(first.logLevel == .trace)
+        #expect(first[metadataKey: "copy"] == nil)
+        #expect(second.logLevel == .error)
+        #expect(second[metadataKey: "copy"] == "second")
+    }
+
     @Test("Query logging never emits invitation tokens or their hashes")
     func invitationQueryLogsRedactBinds() async throws {
         try await withApp { app in
@@ -88,19 +100,25 @@ extension OpenERPTests {
     }
 }
 
-private final class CapturingLogHandler: LogHandler, @unchecked Sendable {
-    private let lock = NSLock()
-    private var captured: [String] = []
+private struct CapturingLogHandler: LogHandler {
+    private let capture = CapturedLogs()
     var metadata: Logger.Metadata = [:]
     var logLevel: Logger.Level = .trace
     subscript(metadataKey key: String) -> Logger.Metadata.Value? {
         get { metadata[key] }
         set { metadata[key] = newValue }
     }
-    var lines: [String] { lock.withLock { captured } }
+    var lines: [String] { capture.lines }
     func log(event: LogEvent) {
-        lock.withLock { captured.append("\(event.message) \(event.metadata ?? [:])") }
+        capture.append("\(event.message) \(event.metadata ?? [:])")
     }
+}
+
+private final class CapturedLogs: @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: [String] = []
+    var lines: [String] { lock.withLock { captured } }
+    func append(_ line: String) { lock.withLock { captured.append(line) } }
 }
 
 private func acceptOnboarding(_ app: Application, access: String, invitation: String, status: HTTPStatus) async throws {
