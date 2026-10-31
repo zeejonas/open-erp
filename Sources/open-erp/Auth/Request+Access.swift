@@ -42,8 +42,24 @@ extension Request {
         try user.requireID()
     }
 
-    /// Verifies the bearer token. Signature, issuer, audience, and expiry failures are `401`.
+    /// Every protected path checks the shared primary database before admitting a request.
     func verifiedAccessToken() async throws -> AccessToken {
+        let (bearer, token) = try await verifiedAccessTokenIgnoringRevocation()
+        let revoked: Bool
+        do {
+            revoked = try await RevokedAccessToken.find(RevokedAccessToken.fingerprint(bearer), on: db) != nil
+        } catch {
+            throw ProblemAbort(status: .serviceUnavailable, code: .authenticationUnavailable)
+        }
+        guard !revoked else {
+            throw ProblemAbort(status: .unauthorized, code: .accessTokenRevoked)
+        }
+        return token
+    }
+
+    /// Verifies signature, issuer, audience, and expiry; failures are `401`.
+    /// Skips revocation, so only logout may call it.
+    func verifiedAccessTokenIgnoringRevocation() async throws -> (bearer: String, token: AccessToken) {
         guard let bearer = headers.bearerAuthorization?.token else {
             throw Abort(.unauthorized)
         }
@@ -57,6 +73,6 @@ extension Request {
         guard token.issuer.value == oidc.issuer, token.audience.value.contains(oidc.audience) else {
             throw ProblemAbort(status: .unauthorized, code: .invalidAccessToken)
         }
-        return token
+        return (bearer, token)
     }
 }

@@ -4,8 +4,9 @@ import VaporToOpenAPI
 extension Route {
     /// Every authenticated operation can fail authentication, authorization, or internally.
     @discardableResult
-    func problemResponses(_ statuses: HTTPStatus...) -> Route {
-        for status in [HTTPStatus.unauthorized, .forbidden, .internalServerError] + statuses {
+    func problemResponses(_ statuses: HTTPStatus..., excluding excluded: Set<HTTPStatus> = []) -> Route {
+        for status in [HTTPStatus.unauthorized, .forbidden, .internalServerError, .serviceUnavailable] + statuses
+        where !excluded.contains(status) {
             response(
                 statusCode: .code(Int(status.code)),
                 body: .type(Problem.self),

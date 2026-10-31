@@ -2,9 +2,14 @@ import Logging
 
 /// Query logs carry bound values, which include token hashes and personal data: PostgresKit logs them as `binds`,
 /// and FluentKit logs written values as `input` and compared values in `filters`.
-/// This handler drops them at every level so query logging stays safe to enable.
+/// PostgresNIO protocol diagnostics may also include row data, binds, or failed-row details.
+/// Drop those payloads at every level so query logging stays safe to enable.
 struct RedactingLogHandler: LogHandler {
-    static let redactedKeys: Set<String> = ["binds", "input", "filters"]
+    static let redactedKeys: Set<String> = [
+        "binds", "input", "filters",
+        "psql_binds", "psql_error", "psql_notice", "psql_message", "psql_message_payload",
+        "psql_connection_action", "psql_user_event",
+    ]
 
     var base: any LogHandler
 

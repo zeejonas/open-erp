@@ -21,6 +21,7 @@ func configure(_ app: Application) async throws {
     // Fluent clamps an oversized page. Handlers reject it first; this limit is the backstop.
     app.fluent.pagination.pageSizeLimit = 100
 
+    app.migrations.add(CreateRevokedAccessToken())
     app.migrations.add(CreateUser())
     app.migrations.add(CreateOrganization())
     app.migrations.add(CreateCompany())
@@ -41,6 +42,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateOrganizationInvitation())
 
     try await configureAuthentication(app)
+    app.asyncCommands.use(PruneRevokedTokensCommand(), as: "prune-revoked-tokens")
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
     app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")
 

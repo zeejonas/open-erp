@@ -38,7 +38,7 @@ struct APIDocumentationTests {
                     #expect(operation["security"] != nil)
                     let responses = try #require(operation["responses"] as? [String: [String: Any]], "Missing responses: \(path)")
                     #expect(!responses.isEmpty)
-                    for status in ["401", "403", "500"] {
+                    for status in ["401", "500", "503"] + (path == "/auth/logout" ? [] : ["403"]) {
                         #expect(responses[status] != nil, "Missing problem response \(status): \(path)")
                     }
                     for (status, response) in responses where (Int(status) ?? 0) >= 400 {
@@ -47,7 +47,7 @@ struct APIDocumentationTests {
                         let schema = try #require(content["application/problem+json"]?["schema"] as? [String: Any])
                         #expect(schema["$ref"] as? String == "#/components/schemas/Problem")
                     }
-                    if route.method != .DELETE {
+                    if route.method != .DELETE && path != "/auth/logout" {
                         #expect(responses["200"]?["content"] != nil, "Missing response schema: \(path)")
                     }
                     if let pending = responses["202"] {
@@ -61,6 +61,21 @@ struct APIDocumentationTests {
                     #expect(!params.contains { $0["name"] as? String == "X-Organization-ID" })
                     #expect(operation["security"] != nil)
                 }
+                let logout = try #require(paths["/auth/logout"]?["post"])
+                #expect(logout["requestBody"] == nil)
+                #expect((logout["parameters"] as? [[String: Any]] ?? []).isEmpty)
+                let logoutSecurity = try #require(logout["security"] as? [[String: Any]])
+                #expect(logoutSecurity.count == 1)
+                let componentsForSecurity = try #require(document["components"] as? [String: Any])
+                let schemes = try #require(componentsForSecurity["securitySchemes"] as? [String: [String: Any]])
+                let schemeName = try #require(logoutSecurity.first?.keys.first)
+                #expect(schemes[schemeName]?["type"] as? String == "http")
+                #expect(schemes[schemeName]?["scheme"] as? String == "bearer")
+                let logoutResponses = try #require(logout["responses"] as? [String: [String: Any]])
+                #expect(logoutResponses["204"] != nil)
+                #expect(logoutResponses["204"]?["content"] == nil)
+                for status in ["400", "401", "503"] { #expect(logoutResponses[status] != nil) }
+                #expect(logoutResponses["403"] == nil)
                 let list = try #require(paths["/companies"]?["get"])
                 let parameters = try #require(list["parameters"] as? [[String: Any]])
                 #expect(Set(parameters.compactMap { $0["name"] as? String }) == ["page", "per", "code", "name", "X-Organization-ID"])

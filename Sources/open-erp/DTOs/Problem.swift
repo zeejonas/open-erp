@@ -29,6 +29,8 @@ enum ProblemCode: String, Codable, CaseIterable, Sendable {
     case tooManyRequests = "too_many_requests"
     case internalError = "internal_error"
     case httpError = "http_error"
+    case accessTokenRevoked = "access_token_revoked"
+    case authenticationUnavailable = "authentication_unavailable"
     case invalidAccessToken = "invalid_access_token"
 
     init(status: HTTPStatus) {

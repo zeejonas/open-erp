@@ -15,8 +15,13 @@ enum InvitationToken {
     }
 
     static func hash(_ token: String) -> String {
-        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+        sha256Hex(token)
     }
+}
+
+/// Credentials are stored and compared only as SHA-256 hex digests.
+func sha256Hex(_ value: some StringProtocol) -> String {
+    SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
 final class OrganizationInvitation: Model, @unchecked Sendable {

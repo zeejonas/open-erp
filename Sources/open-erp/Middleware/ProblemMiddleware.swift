@@ -13,7 +13,7 @@ struct ProblemMiddleware: AsyncMiddleware {
             var headers = abort?.headers ?? [:]
             if status == .unauthorized, !headers.contains(name: .wwwAuthenticate) {
                 // RFC 6750 §3.1: a rejected token gets an error code; a missing one does not.
-                headers.add(name: .wwwAuthenticate, value: code == .invalidAccessToken ? #"Bearer error="invalid_token""# : "Bearer")
+                headers.add(name: .wwwAuthenticate, value: [.invalidAccessToken, .accessTokenRevoked].contains(code) ? #"Bearer error="invalid_token""# : "Bearer")
             }
 
             // Client errors stay out of logs beyond status and code, since their reasons and URLs may carry

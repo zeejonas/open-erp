@@ -33,6 +33,7 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "JWT", package: "jwt"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "SQLKit", package: "sql-kit"),
             ],
             swiftSettings: swiftSettings
         ),

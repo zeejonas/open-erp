@@ -11,6 +11,7 @@ func routes(_ app: Application) throws {
         "Hello, world!"
     }.excludeFromOpenAPI()
 
+    try app.register(collection: AuthController())
     try app.register(collection: MeController())
     try app.register(collection: PlatformController())
     try app.register(collection: InvitationController())
