@@ -39,6 +39,19 @@ struct CompanyListFilters: ListFilters {
     }
 }
 
+struct PlatformOrganizationListFilters: ListFilters {
+    static let keys: Set<String> = ["code", "name", "onboarded"]
+    var code: String?
+    var name: String?
+    var onboarded: Bool?
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("code", as: String.self, is: !.empty, required: false)
+        validations.add("name", as: String.self, is: !.empty, required: false)
+        validations.add("onboarded", as: Bool.self, required: false)
+    }
+}
+
 struct UserListFilters: ListFilters {
     static let keys: Set<String> = ["firstName", "lastName", "email", "groupId"]
     var firstName: String?

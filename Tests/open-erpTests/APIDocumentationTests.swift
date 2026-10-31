@@ -61,6 +61,26 @@ struct APIDocumentationTests {
                     #expect(!params.contains { $0["name"] as? String == "X-Organization-ID" })
                     #expect(operation["security"] != nil)
                 }
+                let directoryComponents = try #require(document["components"] as? [String: Any])
+                let directorySchemas = try #require(directoryComponents["schemas"] as? [String: [String: Any]])
+                let directorySecuritySchemes = try #require(directoryComponents["securitySchemes"] as? [String: [String: Any]])
+                for path in ["/platform/organizations", "/platform/organizations/{organizationID}"] {
+                    let operation = try #require(paths[path]?["get"])
+                    let params = operation["parameters"] as? [[String: Any]] ?? []
+                    #expect(!params.contains { $0["name"] as? String == "X-Organization-ID" })
+                    let security = try #require(operation["security"] as? [[String: Any]])
+                    let scheme = try #require(security.first?.keys.first)
+                    #expect(directorySecuritySchemes[scheme]?["scheme"] as? String == "bearer")
+                    if path == "/platform/organizations" {
+                        #expect(Set(params.compactMap { $0["name"] as? String }) == ["page", "per", "code", "name", "onboarded"])
+                        let boolean = try #require(params.first { $0["name"] as? String == "onboarded" })
+                        #expect((boolean["schema"] as? [String: Any])?["type"] as? String == "boolean")
+                    }
+                }
+                let invitationProperties = try #require(directorySchemas["PlatformOnboardingInvitationDTO"]?["properties"] as? [String: Any])
+                #expect(Set(invitationProperties.keys) == ["id", "email", "firstName", "lastName", "groupId", "expiresAt", "acceptedAt", "revokedAt", "createdById"])
+                let organizationProperties = try #require(directorySchemas["PlatformOrganizationDTO"]?["properties"] as? [String: Any])
+                #expect(Set(organizationProperties.keys) == ["id", "code", "name", "createdById", "updatedById", "createdAt", "updatedAt", "onboardedAt"])
                 let logout = try #require(paths["/auth/logout"]?["post"])
                 #expect(logout["requestBody"] == nil)
                 #expect((logout["parameters"] as? [[String: Any]] ?? []).isEmpty)

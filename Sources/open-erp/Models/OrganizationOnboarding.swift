@@ -39,4 +39,12 @@ extension OrganizationInvitation {
             .sort(\.$id, .descending)
             .first()
     }
+
+    /// Any accepted onboarding invitation, including revoked history.
+    static func hasAcceptedOnboarding(organizationID: UUID, on db: any Database) async throws -> Bool {
+        try await query(on: db, organizationID: organizationID).withDeleted()
+            .filter(\.$isOnboarding == true)
+            .filter(\.$acceptedAt != nil)
+            .first() != nil
+    }
 }

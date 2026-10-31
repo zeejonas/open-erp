@@ -5,6 +5,23 @@ import VaporToOpenAPI
 struct PlatformController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let platform = routes.grouped(AuthMiddleware(), PlatformAdminMiddleware()).grouped("platform")
+        platform.get("organizations", use: self.index)
+            .openAPI(
+                summary: "List organizations",
+                description: "Platform administrator only. Literal case-insensitive code/name filters and onboarded completion filter combine with AND. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated parameters return 400.",
+                query: [.type(ListPage.self), .type(PlatformOrganizationListFilters.self)],
+                response: .type(Page<PlatformOrganizationDTO>.self),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest)
+        platform.get("organizations", ":organizationID", use: self.show)
+            .openAPI(
+                summary: "Get organization onboarding detail",
+                description: "Platform administrator only. Completion and invitation lifecycle are separate facts; diagnostics are advisory. Grants no tenant access.",
+                response: .type(PlatformOrganizationDetailDTO.self),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest, .notFound)
         platform.post("organizations", use: self.provision)
             .openAPI(
                 summary: "Create organization",
@@ -19,6 +36,53 @@ struct PlatformController: RouteCollection {
                 description: "Platform administrator only. No body or recipient changes. Replaces incomplete onboarding with a seven-day token returned once. 409 for completed/unavailable onboarding or an unavailable original group.",
                 response: .type(ProvisionOrganizationResponse.self), auth: .bearer())
             .problemResponses(.badRequest, .notFound, .conflict)
+    }
+
+    @Sendable
+    func index(req: Request) async throws -> Page<PlatformOrganizationDTO> {
+        let (filters, page) = try req.listParameters(PlatformOrganizationListFilters.self)
+        let query = Organization.query(on: req.db)
+            .filter(\.$code, contains: filters.code)
+            .filter(\.$name, contains: filters.name)
+        if let onboarded = filters.onboarded {
+            query.filter(\.$onboardedAt, onboarded ? .notEqual : .equal, nil)
+        }
+        return try await query.newestFirst(\.$updatedAt).paginate(page)
+            .map { try PlatformOrganizationDTO($0) }
+    }
+
+    @Sendable
+    func show(req: Request) async throws -> PlatformOrganizationDetailDTO {
+        guard let id = req.parameters.get("organizationID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid organization ID")
+        }
+        guard let organization = try await Organization.find(id, on: req.db) else {
+            throw Abort(.notFound)
+        }
+        let invitation = try await OrganizationInvitation.onboarding(organizationID: id, on: req.db)
+        return PlatformOrganizationDetailDTO(
+            organization: try PlatformOrganizationDTO(organization),
+            onboardingInvitation: try invitation.map(PlatformOnboardingInvitationDTO.init),
+            onboardingIssue: try await onboardingIssue(organization, invitation, on: req.db)
+        )
+    }
+
+    /// Advisory: reissue's locked transaction remains authoritative.
+    private func onboardingIssue(
+        _ organization: Organization,
+        _ invitation: OrganizationInvitation?,
+        on db: any Database
+    ) async throws -> PlatformOnboardingIssue? {
+        guard organization.onboardedAt == nil else { return nil }
+        let id = try organization.requireID()
+        if try await OrganizationInvitation.hasAcceptedOnboarding(organizationID: id, on: db) {
+            return .acceptedWithoutCompletion
+        }
+        guard let invitation else { return .missingOnboardingInvitation }
+        guard let groupID = invitation.$group.id,
+            try await AccessGroup.query(on: db, organizationID: id).filter(\.$id == groupID).first() != nil
+        else { return .originalGroupUnavailable }
+        return nil
     }
 
     @Sendable
@@ -76,9 +140,8 @@ struct PlatformController: RouteCollection {
         let actorID = try req.userID()
         return try await req.db.transaction { db in
             let organization = try await lockOrganization(id, on: db)
-            let acceptedHistory = try await OrganizationInvitation.query(on: db, organizationID: id)
-                .withDeleted().filter(\.$isOnboarding == true).filter(\.$acceptedAt != nil).count()
-            guard organization.onboardedAt == nil, acceptedHistory == 0,
+            guard organization.onboardedAt == nil,
+                try await !OrganizationInvitation.hasAcceptedOnboarding(organizationID: id, on: db),
                 let previous = try await OrganizationInvitation.onboarding(organizationID: id, on: db),
                 let groupID = previous.$group.id,
                 try await lockGroup(groupID, organizationID: id, on: db) != nil
