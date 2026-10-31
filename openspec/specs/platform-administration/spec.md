@@ -47,6 +47,13 @@ The system SHALL expose `POST /platform/organizations`, available only to authen
 - **WHEN** any step of provisioning fails
 - **THEN** no organization, role, group, or invitation is persisted
 
+### Requirement: One-time invitation token disclosure
+Provisioning and administrator invitation reissue SHALL return the invitation token only in the response that creates it. The system SHALL persist only its hash and SHALL NOT expose an API to retrieve the original token later. Recovering a lost token SHALL require reissue, which invalidates the previous token.
+
+#### Scenario: Lost provisioning or reissue response
+- **WHEN** a platform administrator loses the response containing an invitation token
+- **THEN** the original token cannot be retrieved, and recovering incomplete onboarding requires reissue
+
 ### Requirement: No implicit tenant access
 The platform administrator flag SHALL NOT grant membership, permissions, or data access in any organization. Organization-scoped routes SHALL treat platform administrators like any other user.
 

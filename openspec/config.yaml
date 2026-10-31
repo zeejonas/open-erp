@@ -7,6 +7,7 @@ context: |
   Access: zero-trust RBAC via explicit permissions; soft deletes; audit attribution on every write.
   Compliance: design for SOX and SOC controls.
   Principles: simplest readable code, minimal bloat, no tests for the sake of testing.
+  API independence: no backend change may be justified only by a specific UI. Each requirement must make sense as an API capability, without naming a screen. UI implementations own their session stores; the backend must not own UI-specific tables or require clients to access its database directly.
   Ground decisions in current Vapor docs (docs.vapor.codes, api.vapor.codes) or a demo.
   Pre-release: one create migration per table, edited in place; after the first production release, migrations are frozen and changes are additive
 
