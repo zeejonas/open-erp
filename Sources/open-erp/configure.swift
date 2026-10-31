@@ -6,6 +6,8 @@ import Vapor
 /// configures your application
 func configure(_ app: Application) async throws {
     configureProblemMiddleware(app)
+    // Wrap error handling so generated failures receive the same cache policy.
+    app.middleware.use(NoStoreMiddleware(), at: .beginning)
     // uncomment to serve files from /Public folder
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 

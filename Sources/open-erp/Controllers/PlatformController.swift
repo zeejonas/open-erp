@@ -16,18 +16,18 @@ struct PlatformController: RouteCollection {
             .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
         platform.post("organizations", ":organizationID", "admin-invitation", "reissue", use: self.reissue)
             .openAPI(summary: "Reissue administrator invitation",
-                description: "Platform administrator only. No body or recipient changes. Replaces incomplete onboarding with a seven-day token returned once. 409 for completed/unavailable onboarding or an unavailable original group. Cache-Control: no-store.",
+                description: "Platform administrator only. No body or recipient changes. Replaces incomplete onboarding with a seven-day token returned once. 409 for completed/unavailable onboarding or an unavailable original group.",
                 response: .type(ProvisionOrganizationResponse.self), auth: .bearer())
             .problemResponses(.badRequest, .notFound, .conflict)
     }
 
     @Sendable
-    func provision(req: Request) async throws -> Response {
+    func provision(req: Request) async throws -> ProvisionOrganizationResponse {
         try ProvisionOrganizationDTO.validate(content: req)
         let dto = try req.content.decode(ProvisionOrganizationDTO.self)
         let actorID = try req.userID()
 
-        let result = try await conflictOnDuplicate("An organization with this code already exists") {
+        return try await conflictOnDuplicate("An organization with this code already exists") {
             try await req.db.transaction { db in
                 let organization = Organization(
                     code: dto.code,
@@ -62,13 +62,10 @@ struct PlatformController: RouteCollection {
                 )
             }
         }
-        let response = try await result.encodeResponse(for: req)
-        response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
-        return response
     }
 
     @Sendable
-    func reissue(req: Request) async throws -> Response {
+    func reissue(req: Request) async throws -> ProvisionOrganizationResponse {
         guard let id = req.parameters.get("organizationID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid organization ID")
         }
@@ -77,7 +74,7 @@ struct PlatformController: RouteCollection {
             throw Abort(.badRequest, reason: "Reissue accepts no request body")
         }
         let actorID = try req.userID()
-        let result = try await req.db.transaction { db in
+        return try await req.db.transaction { db in
             let organization = try await lockOrganization(id, on: db)
             let acceptedHistory = try await OrganizationInvitation.query(on: db, organizationID: id)
                 .withDeleted().filter(\.$isOnboarding == true).filter(\.$acceptedAt != nil).count()
@@ -96,8 +93,5 @@ struct PlatformController: RouteCollection {
             return ProvisionOrganizationResponse(organization: organization.toGetDTO(),
                 invitationToken: token, invitation: invitation.toGetDTO())
         }
-        let response = try await result.encodeResponse(for: req)
-        response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
-        return response
     }
 }

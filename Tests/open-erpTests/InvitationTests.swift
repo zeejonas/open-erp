@@ -99,6 +99,7 @@ extension OpenERPTests {
                 #expect(res.status == .ok)
                 let body = try res.content.decode(CreateInvitationResponse.self)
                 inviteToken = body.token
+                #expect(res.headers[.cacheControl] == ["no-store"])
                 #expect(body.invitation.email == "bea@acme.com")
                 let stored = try await OrganizationInvitation.query(on: app.db)
                     .filter(\.$tokenHash == InvitationToken.hash(body.token))
