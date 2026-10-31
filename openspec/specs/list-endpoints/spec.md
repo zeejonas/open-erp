@@ -30,7 +30,7 @@ Every endpoint that returns a collection SHALL respond with `{ "items": [...], "
 - **THEN** the system responds `403 Forbidden`
 
 ### Requirement: Strict list parameters
-Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1), `per` (an integer from 1 to 100, default 25), and only the filters it declares. The system SHALL respond `400 Bad Request` with a reason naming the parameter when a value is out of range, not an integer, an empty filter, an unknown enum value, an undeclared parameter, or a repeated parameter. It SHALL NOT clamp, ignore, or otherwise reinterpret a parameter.
+Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1), `per` (an integer from 1 to 100, default 25), and only the filters it declares. The system SHALL respond `400 Bad Request` with a `bad_request` problem whose `detail` names the parameter when a value is out of range, not an integer, an empty filter, an unknown enum value, an undeclared parameter, or a repeated parameter. It SHALL NOT clamp, ignore, or otherwise reinterpret a parameter.
 
 #### Scenario: Oversized page size
 - **WHEN** a member calls `GET /roles?per=101`
