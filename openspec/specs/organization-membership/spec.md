@@ -119,3 +119,26 @@ Members with `organization_user:read` SHALL be able to list and view the organiz
 #### Scenario: Link by UUID removed
 - **WHEN** a client calls `POST /organization-users`
 - **THEN** the system responds `404 Not Found`
+
+### Requirement: Coordinate onboarding acceptance and recovery
+Initial onboarding invitation acceptance and platform reissue SHALL serialize on the same organization before their definitive invitation/state checks. Acceptance SHALL retain verified matching email, identity binding, active same-organization group, tenant isolation, and existing approval checks. Acceptance of a marked onboarding invitation SHALL permanently set onboardedAt in the same transaction as membership, group membership, and acceptedBy/acceptedAt. The system SHALL recheck that the organization exists and is active under that coordination. Ordinary invitation acceptance SHALL NOT set or clear onboarding completion.
+
+#### Scenario: Acceptance wins the race
+- **WHEN** initial invitation acceptance commits before concurrent reissue
+- **THEN** membership and completion are committed together and reissue returns 409 without issuing another invitation
+
+#### Scenario: Reissue wins the race
+- **WHEN** reissue commits before the old invitation's definitive acceptance check, including after an external userinfo fetch began
+- **THEN** acceptance of the old token returns 404 and creates no membership or completion
+
+#### Scenario: Completion rollback
+- **WHEN** initial acceptance fails during membership or group assignment
+- **THEN** onboarding completion and invitation acceptance remain unchanged
+
+#### Scenario: Identity and group checks still apply
+- **WHEN** initial acceptance has a mismatching/unverified email or a group outside the organization
+- **THEN** acceptance fails under the existing invitation rules and onboarding remains incomplete
+
+#### Scenario: Ordinary invitation after onboarding
+- **WHEN** an ordinary invitation is accepted into an already onboarded organization
+- **THEN** the original completion timestamp is unchanged

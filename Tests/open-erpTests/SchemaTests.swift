@@ -4,6 +4,32 @@ import Foundation
 import Testing
 
 extension OpenERPTests {
+    @Test("Only one current onboarding invitation; ordinary invitations and revoked history remain allowed")
+    func onboardingUniqueness() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ONBR", name: "Onboarding")
+            let id = try org.requireID()
+            #expect(org.onboardedAt == nil)
+            let (initial, _) = try await OrganizationInvitation.issue(
+                organizationID: id, email: "admin@example.com", firstName: "A", lastName: "B",
+                groupID: nil, createdByID: nil, isOnboarding: true, on: app.db)
+            try await expectUniqueViolation {
+                _ = try await OrganizationInvitation.issue(
+                    organizationID: id, email: "admin@example.com", firstName: "A", lastName: "B",
+                    groupID: nil, createdByID: nil, isOnboarding: true, on: app.db)
+            }
+            let (ordinary, _) = try await OrganizationInvitation.issue(
+                organizationID: id, email: "user@example.com", firstName: "A", lastName: "B",
+                groupID: nil, createdByID: nil, on: app.db)
+            #expect(!ordinary.isOnboarding)
+            try await initial.delete(on: app.db)
+            _ = try await OrganizationInvitation.issue(
+                organizationID: id, email: "admin@example.com", firstName: "A", lastName: "B",
+                groupID: nil, createdByID: nil, isOnboarding: true, on: app.db)
+            #expect(try await OrganizationInvitation.query(on: app.db).withDeleted().count() == 3)
+        }
+    }
+
     @Test("A tenant-owned row without an existing organization is rejected")
     func orphanTenantRowIsRejected() async throws {
         try await withApp { app in

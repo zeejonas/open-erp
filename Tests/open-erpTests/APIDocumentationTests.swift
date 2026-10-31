@@ -44,6 +44,13 @@ struct APIDocumentationTests {
                         #expect(pending["content"] != nil, "Missing approval schema: \(path)")
                     }
                 }
+                #expect(paths["/platform/organizations"]?["post"]?["summary"] as? String == "Create organization")
+                for path in ["/platform/organizations", "/platform/organizations/{organizationID}/admin-invitation/reissue"] {
+                    let operation = try #require(paths[path]?["post"])
+                    let params = operation["parameters"] as? [[String: Any]] ?? []
+                    #expect(!params.contains { $0["name"] as? String == "X-Organization-ID" })
+                    #expect(operation["security"] != nil)
+                }
                 let list = try #require(paths["/companies"]?["get"])
                 let parameters = try #require(list["parameters"] as? [[String: Any]])
                 #expect(Set(parameters.compactMap { $0["name"] as? String }) == ["page", "per", "code", "name", "X-Organization-ID"])

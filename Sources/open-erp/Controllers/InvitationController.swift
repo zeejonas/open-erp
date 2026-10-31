@@ -106,7 +106,8 @@ struct InvitationController: RouteCollection {
 
         return try await conflictOnDuplicate("User is already a member of this organization") {
             try await req.db.transaction { db in
-                // Re-read so a revocation or acceptance that landed during the userinfo call wins.
+                let organization = try await lockOrganization(invitation.$organization.id, on: db)
+                // Definitive lookup follows the organization lock, after any userinfo delay.
                 guard let current = try await OrganizationInvitation.pending(on: db)
                     .filter(\.$id == invitation.requireID())
                     .first()
@@ -115,6 +116,7 @@ struct InvitationController: RouteCollection {
                 }
 
                 let organizationID = current.$organization.id
+                if current.isOnboarding, organization.onboardedAt != nil { throw Abort(.conflict) }
                 if let requestID = current.$approvalRequest.id {
                     guard let approval = try await ApprovalRequest.find(requestID, on: db),
                         approval.status == ApprovalRequestStatus.applied.rawValue
@@ -148,6 +150,11 @@ struct InvitationController: RouteCollection {
                 current.acceptedAt = Date()
                 current.$acceptedBy.id = userID
                 try await current.save(on: db)
+                if current.isOnboarding {
+                    organization.onboardedAt = current.acceptedAt
+                    organization.$updatedBy.id = userID
+                    try await organization.save(on: db)
+                }
 
                 return AcceptInvitationResponse(user: user.toGetDTO(), organizationId: organizationID)
             }

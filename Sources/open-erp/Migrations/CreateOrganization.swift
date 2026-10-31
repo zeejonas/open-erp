@@ -6,6 +6,7 @@ struct CreateOrganization: AsyncMigration {
     func prepare(on database: any Database) async throws {
         try await database.schema("organizations")
             .field("id", .uuid, .identifier(auto: false), .sql(.default(SQLFunction("gen_random_uuid"))))
+            .field("onboarded_at", .datetime)
             .field("code", .string, .required)
             .field("name", .string, .required)
             .field("created_by", .uuid, .references("users", "id"))

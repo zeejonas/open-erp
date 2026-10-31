@@ -48,6 +48,10 @@ extension OpenERPTests {
                 #expect(res.status == .ok)
                 let body = try res.content.decode(ProvisionOrganizationResponse.self)
                 let adminID = try admin.requireID()
+                #expect(res.headers.first(name: .cacheControl) == "no-store")
+                #expect(body.invitation.email == "cfo@acme.com")
+                #expect(body.invitation.createdById == adminID)
+                #expect(body.invitation.expiresAt > Date())
                 #expect(body.organization.name == "Acme LLC")
                 #expect(body.organization.createdById == adminID)
                 organizationID = body.organization.id
@@ -87,6 +91,9 @@ extension OpenERPTests {
             let invitation = try await OrganizationInvitation.query(on: app.db)
                 .filter(\.$tokenHash == InvitationToken.hash(token))
                 .first()
+            #expect(invitation?.isOnboarding == true)
+            #expect(invitation?.tokenHash != token)
+            #expect(invitation?.$createdBy.id == admin.id)
             #expect(invitation?.email == "cfo@acme.com")
             #expect(invitation?.$group.id == adminGroup.id)
 

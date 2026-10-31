@@ -43,6 +43,9 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
     @OptionalParent(key: "approval_request_id")
     var approvalRequest: ApprovalRequest?
 
+    @Field(key: "is_onboarding")
+    var isOnboarding: Bool
+
     @Field(key: "token_hash")
     var tokenHash: String
 
@@ -72,8 +75,10 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         tokenHash: String,
         expiresAt: Date,
         createdByID: UUID?,
-        approvalRequestID: UUID? = nil
+        approvalRequestID: UUID? = nil,
+        isOnboarding: Bool = false
     ) {
+        self.isOnboarding = isOnboarding
         self.$organization.id = organizationID
         self.email = email
         self.firstName = firstName
@@ -121,6 +126,7 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
         id: UUID? = nil,
         token: String? = nil,
         approvalRequestID: UUID? = nil,
+        isOnboarding: Bool = false,
         on db: any Database
     ) async throws -> (OrganizationInvitation, String) {
         let token = token ?? InvitationToken.generate()
@@ -133,7 +139,8 @@ final class OrganizationInvitation: Model, @unchecked Sendable {
             tokenHash: InvitationToken.hash(token),
             expiresAt: Date().addingTimeInterval(InvitationToken.lifetime),
             createdByID: createdByID,
-            approvalRequestID: approvalRequestID
+            approvalRequestID: approvalRequestID,
+            isOnboarding: isOnboarding
         )
         if let id {
             invitation.id = id

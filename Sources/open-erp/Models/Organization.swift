@@ -14,6 +14,9 @@ final class Organization: Model, @unchecked Sendable {
     @Field(key: "name")
     var name: String
 
+    @OptionalField(key: "onboarded_at")
+    var onboardedAt: Date?
+
     @Children(for: \.$organization)
     var companies: [Company]
 

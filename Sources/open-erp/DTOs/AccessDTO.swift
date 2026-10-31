@@ -189,4 +189,5 @@ extension ProvisionOrganizationDTO: Validatable {
 struct ProvisionOrganizationResponse: Content {
     var organization: GetOrganizationDTO
     var invitationToken: String
+    var invitation: GetInvitationDTO
 }

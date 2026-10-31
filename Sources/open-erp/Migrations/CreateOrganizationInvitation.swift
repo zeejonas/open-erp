@@ -1,6 +1,7 @@
 import Fluent
 import FluentSQL
 import SQLKit
+import Vapor
 
 struct CreateOrganizationInvitation: AsyncMigration {
     func prepare(on database: any Database) async throws {
@@ -10,6 +11,7 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("email", .string, .required)
             .field("first_name", .string, .required)
             .field("last_name", .string, .required)
+            .field("is_onboarding", .bool, .required, .sql(.default(SQLLiteral.boolean(false))))
             .field("token_hash", .string, .required)
             .field("expires_at", .datetime, .required)
             .field("accepted_at", .datetime)
@@ -22,6 +24,12 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("approval_request_id", .uuid, .references("approval_requests", "id"))
             .unique(on: "token_hash")
             .create()
+        guard let sql = database as? any SQLDatabase else { throw Abort(.internalServerError) }
+        try await sql.raw("""
+            CREATE UNIQUE INDEX organization_invitations_current_onboarding
+            ON organization_invitations (organization_id)
+            WHERE deleted_at IS NULL AND is_onboarding
+            """).run()
     }
 
     func revert(on database: any Database) async throws {

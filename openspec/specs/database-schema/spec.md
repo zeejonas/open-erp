@@ -53,3 +53,14 @@ From the first production release, the set of registered migrations SHALL be fro
 #### Scenario: Column added after release
 - **WHEN** a change after the first production release adds a column
 - **THEN** it adds a new migration that updates the table, and the released create migration is unchanged
+
+### Requirement: Persist onboarding lineage and completion
+The organization create migration SHALL declare nullable onboarded_at. The invitation create migration SHALL declare non-null is_onboarding defaulting to false and enforce at most one non-deleted onboarding invitation per organization. Invitation lineage SHALL retain prior rows and actor/time attribution. These additions SHALL edit the owning create migrations under the pre-release policy without registering an alter migration.
+
+#### Scenario: Fresh onboarding schema
+- **WHEN** migrations apply to an empty database
+- **THEN** both fields and the active onboarding uniqueness constraint exist and the schema still reverts cleanly
+
+#### Scenario: Duplicate current onboarding invitation
+- **WHEN** a second non-deleted onboarding invitation is inserted for one organization
+- **THEN** the database rejects it, while replacement after revocation preserves the historical row
