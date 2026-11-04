@@ -40,15 +40,17 @@ struct CompanyListFilters: ListFilters {
 }
 
 struct PlatformOrganizationListFilters: ListFilters {
-    static let keys: Set<String> = ["code", "name", "onboarded"]
+    static let keys: Set<String> = ["code", "name", "onboarded", "deleted"]
     var code: String?
     var name: String?
     var onboarded: Bool?
+    var deleted: Bool?
 
     static func validations(_ validations: inout Validations) {
         validations.add("code", as: String.self, is: !.empty, required: false)
         validations.add("name", as: String.self, is: !.empty, required: false)
         validations.add("onboarded", as: Bool.self, required: false)
+        validations.add("deleted", as: Bool.self, required: false)
     }
 }
 
@@ -64,6 +66,15 @@ struct UserListFilters: ListFilters {
         validations.add("lastName", as: String.self, is: !.empty, required: false)
         validations.add("email", as: String.self, is: !.empty, required: false)
         validations.add("groupId", as: UUID.self, required: false)
+    }
+}
+
+struct PermissionListFilters: ListFilters {
+    static let keys: Set<String> = ["level"]
+    var level: RoleLevel?
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("level", as: String.self, is: .case(of: RoleLevel.self), required: false)
     }
 }
 

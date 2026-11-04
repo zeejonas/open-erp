@@ -13,6 +13,14 @@ private let duplicatePolicy = "An approval policy with this name already exists"
 extension ProposedChange {
     func check(on db: any Database, organizationID: UUID) async throws {
         switch self {
+        case .organizationUserDelete, .groupMemberDelete, .groupRoleDelete,
+             .roleUpdate, .approvalPolicyCreate, .approvalPolicyUpdate:
+            _ = try await lockOrganization(organizationID, on: db)
+        default:
+            break
+        }
+
+        switch self {
         case .organizationUpdate(let id, let before, let after):
             let organization = try await requireOrganization(id, on: db)
             try throwIfStale(before.code != after.code && organization.code != before.code)
@@ -32,6 +40,9 @@ extension ProposedChange {
             }
         case .organizationUserDelete(let userID):
             _ = try await requireMembership(userID: userID, organizationID: organizationID, on: db)
+            try await checkAccessReduction(organizationID: organizationID, on: db, checkPolicies: true) {
+                $0.removeMember(userID)
+            }
         case .organizationInvitationCreate(let draft):
             if let groupID = draft.groupId {
                 try await requireActiveGroup(groupID, organizationID: organizationID, on: db)
@@ -61,7 +72,12 @@ extension ProposedChange {
             try throwIfStale(before.name != after.name && role.name != before.name)
             try throwIfStale(Set(before.permissions) != Set(after.permissions) && current != Set(before.permissions))
             if Set(before.permissions) != Set(after.permissions) {
-                _ = try resolvedPermissions(after.permissions, level: role.level)
+                let permissions = try resolvedPermissions(after.permissions, level: role.level)
+                if !current.isSubset(of: Set(after.permissions)) {
+                    try await checkAccessReduction(organizationID: organizationID, on: db) {
+                        $0.replaceRolePermissions(id, with: Set(permissions))
+                    }
+                }
             }
         case .roleDelete(let id, _):
             let role = try await requireRole(id, organizationID: organizationID, on: db)
@@ -89,6 +105,9 @@ extension ProposedChange {
             _ = try await requireMembership(userID: draft.userId, organizationID: organizationID, on: db)
         case .groupMemberDelete(let draft):
             _ = try await requireGroupMember(draft, organizationID: organizationID, on: db)
+            try await checkAccessReduction(organizationID: organizationID, on: db, checkPolicies: true) {
+                $0.removeGroupMember(draft.userId, from: draft.groupId)
+            }
         case .groupRoleCreate(let draft):
             _ = try await requireGroup(draft.groupId, organizationID: organizationID, on: db)
             guard try await Role.query(on: db, organizationID: organizationID).filter(\.$id == draft.roleId).first() != nil else {
@@ -96,6 +115,9 @@ extension ProposedChange {
             }
         case .groupRoleDelete(let draft):
             _ = try await requireGroupRole(draft, on: db)
+            try await checkAccessReduction(organizationID: organizationID, on: db) {
+                $0.removeGroupRole(draft.roleId, from: draft.groupId)
+            }
         case .groupCompanyCreate(let draft):
             _ = try await requireGroup(draft.groupId, organizationID: organizationID, on: db)
             guard try await Company.query(on: db, organizationID: organizationID).filter(\.$id == draft.companyId).first() != nil else {
@@ -117,7 +139,13 @@ extension ProposedChange {
             try throwIfStale(changed.contains("fields") && Set(current.fields) != Set(before.normalized().fields))
             try throwIfStale(changed.contains("companyId") && current.companyId != before.normalized().companyId)
             try throwIfStale(changed.contains("stages") && current.stages != before.normalized().stages)
-            try await validatePolicy(after.normalized(), on: db, organizationID: organizationID)
+            let after = after.normalized()
+            var result = current
+            if changed.contains("name") { result.name = after.name }
+            if changed.contains("fields") { result.fields = after.fields }
+            if changed.contains("companyId") { result.companyId = after.companyId }
+            if changed.contains("stages") { result.stages = after.stages }
+            try await validatePolicy(result, on: db, organizationID: organizationID)
         case .approvalPolicyDelete(let id, _):
             _ = try await requirePolicy(id, organizationID: organizationID, on: db)
         }

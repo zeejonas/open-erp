@@ -99,11 +99,3 @@ func activeGroupIDs(userID: UUID, organizationID: UUID, on db: any Database) asy
         .all()
     return Set(memberships.map(\.$group.id))
 }
-
-func activeMemberCount(groupID: UUID, on db: any Database) async throws -> Int {
-    try await GroupMember.query(on: db)
-        .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
-        .filter(\.$group.$id == groupID)
-        .filter(OrganizationUser.self, \.$deletedAt == nil)
-        .count()
-}

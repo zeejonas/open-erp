@@ -151,6 +151,9 @@ accept those cookies, or require clients to access its database. Use HTTPS in de
 | `GET /health` | No | No | Database and signing-key readiness |
 | `GET /docs`, `GET /openapi.json` | No | No | Public API documentation |
 | `/me`, `/me/organizations` | Yes | No | Bound, active ERP user |
+| `GET /me/access` | Yes | Required | Active membership |
+| `GET /permissions` | Yes | Required | Active membership and `role:read` |
+| `POST /platform/organizations/:organizationID/restore` | Yes | No | Platform administrator and a restoration reason |
 | `/platform/organizations` and its subroutes | Yes | No | Platform administrator |
 | `POST /invitations/accept` | Yes | No | Valid invitation and verified matching email; user binding may be created here |
 | `POST /auth/logout` | Yes | Forbidden | Standard JWT validation; user binding and membership unnecessary |

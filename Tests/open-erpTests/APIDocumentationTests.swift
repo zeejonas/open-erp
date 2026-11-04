@@ -26,6 +26,7 @@ struct APIDocumentationTests {
                 #expect(paths["/health"] == nil)
                 #expect(paths["/hello"] == nil)
                 #expect(paths["/"] == nil)
+                #expect(paths.values.reduce(0) { $0 + $1.count } == 57)
 
                 // Catch forgotten annotations and silent schema-generation failures on any route.
                 for route in app.routes.all where !["/health", "/docs", "/openapi.json"].contains("/" + route.path.map(\.description).joined(separator: "/")) {
@@ -55,7 +56,7 @@ struct APIDocumentationTests {
                     }
                 }
                 #expect(paths["/platform/organizations"]?["post"]?["summary"] as? String == "Create organization")
-                for path in ["/platform/organizations", "/platform/organizations/{organizationID}/admin-invitation/reissue"] {
+                for path in ["/platform/organizations", "/platform/organizations/{organizationID}/admin-invitation/reissue", "/platform/organizations/{organizationID}/restore"] {
                     let operation = try #require(paths[path]?["post"])
                     let params = operation["parameters"] as? [[String: Any]] ?? []
                     #expect(!params.contains { $0["name"] as? String == "X-Organization-ID" })
@@ -72,7 +73,7 @@ struct APIDocumentationTests {
                     let scheme = try #require(security.first?.keys.first)
                     #expect(directorySecuritySchemes[scheme]?["scheme"] as? String == "bearer")
                     if path == "/platform/organizations" {
-                        #expect(Set(params.compactMap { $0["name"] as? String }) == ["page", "per", "code", "name", "onboarded"])
+                        #expect(Set(params.compactMap { $0["name"] as? String }) == ["page", "per", "code", "name", "onboarded", "deleted"])
                         let boolean = try #require(params.first { $0["name"] as? String == "onboarded" })
                         #expect((boolean["schema"] as? [String: Any])?["type"] as? String == "boolean")
                     }
@@ -80,7 +81,7 @@ struct APIDocumentationTests {
                 let invitationProperties = try #require(directorySchemas["PlatformOnboardingInvitationDTO"]?["properties"] as? [String: Any])
                 #expect(Set(invitationProperties.keys) == ["id", "email", "firstName", "lastName", "groupId", "expiresAt", "acceptedAt", "revokedAt", "createdById"])
                 let organizationProperties = try #require(directorySchemas["PlatformOrganizationDTO"]?["properties"] as? [String: Any])
-                #expect(Set(organizationProperties.keys) == ["id", "code", "name", "createdById", "updatedById", "createdAt", "updatedAt", "onboardedAt"])
+                #expect(Set(organizationProperties.keys) == ["id", "code", "name", "createdById", "updatedById", "createdAt", "updatedAt", "onboardedAt", "deletedAt", "deletedById"])
                 let logout = try #require(paths["/auth/logout"]?["post"])
                 #expect(logout["requestBody"] == nil)
                 #expect((logout["parameters"] as? [[String: Any]] ?? []).isEmpty)

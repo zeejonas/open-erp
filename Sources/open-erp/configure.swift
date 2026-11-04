@@ -37,6 +37,7 @@ func configureServices(_ app: Application) throws {
     app.migrations.add(CreateRevokedAccessToken())
     app.migrations.add(CreateUser())
     app.migrations.add(CreateOrganization())
+    app.migrations.add(CreateOrganizationRestoration())
     app.migrations.add(CreateCompany())
     app.migrations.add(CreateOrganizationUser())
     app.migrations.add(CreateCompanyUser())

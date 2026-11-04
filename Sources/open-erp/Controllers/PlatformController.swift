@@ -8,7 +8,7 @@ struct PlatformController: RouteCollection {
         platform.get("organizations", use: self.index)
             .openAPI(
                 summary: "List organizations",
-                description: "Platform administrator only. Literal case-insensitive code/name filters and onboarded completion filter combine with AND. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated parameters return 400.",
+                description: "Platform administrator only. Literal case-insensitive code/name filters and onboarded/deleted filters combine with AND. Set deleted=true to list deleted organizations only. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated parameters return 400.",
                 query: [.type(ListPage.self), .type(PlatformOrganizationListFilters.self)],
                 response: .type(Page<PlatformOrganizationDTO>.self),
                 auth: .bearer()
@@ -31,6 +31,15 @@ struct PlatformController: RouteCollection {
                 auth: .bearer()
             )
             .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .conflict)
+        platform.post("organizations", ":organizationID", "restore", use: self.restore)
+            .openAPI(
+                summary: "Restore organization",
+                description: "Platform administrator only. Requires a reason and records restoration evidence.",
+                body: .type(RestoreOrganizationDTO.self),
+                response: .type(PlatformOrganizationDTO.self),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType, .notFound, .conflict)
         platform.post("organizations", ":organizationID", "admin-invitation", "reissue", use: self.reissue)
             .openAPI(summary: "Reissue administrator invitation",
                 description: "Platform administrator only. No body or recipient changes. Replaces incomplete onboarding with a seven-day token returned once. 409 for completed/unavailable onboarding or an unavailable original group.",
@@ -44,11 +53,53 @@ struct PlatformController: RouteCollection {
         let query = Organization.query(on: req.db)
             .filter(\.$code, contains: filters.code)
             .filter(\.$name, contains: filters.name)
+        if filters.deleted == true {
+            query.withDeleted().filter(\.$deletedAt != nil)
+        }
         if let onboarded = filters.onboarded {
             query.filter(\.$onboardedAt, onboarded ? .notEqual : .equal, nil)
         }
         return try await query.newestFirst(\.$updatedAt).paginate(page)
             .map { try PlatformOrganizationDTO($0) }
+    }
+
+    @Sendable
+    func restore(req: Request) async throws -> PlatformOrganizationDTO {
+        guard let id = req.parameters.get("organizationID", as: UUID.self) else {
+            throw Abort(.notFound)
+        }
+        guard let body = req.body.data, body.readableBytes > 0 else {
+            throw Abort(.badRequest, reason: "reason is required")
+        }
+        let reason = try req.content.decode(RestoreOrganizationDTO.self).reason
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reason.isEmpty else {
+            throw Abort(.badRequest, reason: "reason must not be empty")
+        }
+        let actorID = try req.userID()
+        let restored = try await req.db.transaction { db in
+            let organization = try await lockOrganization(id, includingDeleted: true, on: db)
+            guard let deletedAt = organization.deletedAt else {
+                throw Abort(.conflict, reason: "Organization is active")
+            }
+            try await OrganizationRestoration(
+                organizationID: id,
+                deletedAt: deletedAt,
+                deletedByID: organization.$deletedBy.id,
+                restoredByID: actorID,
+                reason: reason
+            ).create(on: db)
+            organization.$deletedBy.id = nil
+            organization.$updatedBy.id = actorID
+            organization.updatedAt = Date()
+            try await organization.restore(on: db)
+            return try PlatformOrganizationDTO(organization)
+        }
+        req.logger.notice("Organization restored", metadata: [
+            "organization_id": "\(id)",
+            "restored_by": "\(actorID)",
+        ])
+        return restored
     }
 
     @Sendable

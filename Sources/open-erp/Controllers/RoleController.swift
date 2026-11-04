@@ -4,7 +4,18 @@ import VaporToOpenAPI
 
 struct RoleController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
-        let roles = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("roles")
+        let scoped = routes.grouped(AuthMiddleware(), OrganizationMiddleware())
+        scoped.get("permissions", use: self.catalog)
+            .openAPI(
+                summary: "List permissions",
+                description: "Requires role:read. Ordered by permission ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(PermissionListFilters.self)],
+                headers: .type(OrganizationHeaders.self),
+                response: .type(Page<PermissionDTO>.self),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest)
+        let roles = scoped.grouped("roles")
         roles.post(use: self.create)
             .openAPI(
                 summary: "Create role",
@@ -59,6 +70,20 @@ struct RoleController: RouteCollection {
                 .problemResponses(.badRequest, .notFound, .conflict)
                 .response(statusCode: 202, body: .type(GetApprovalRequestDTO.self), description: "Waiting for approval")
         }
+    }
+
+    @Sendable
+    func catalog(req: Request) async throws -> Page<PermissionDTO> {
+        try req.require(.roleRead)
+        let (filters, page) = try req.listParameters(PermissionListFilters.self)
+        let permissions = Permission.allCases
+            .filter { filters.level == nil || $0.level == filters.level }
+            .sorted { $0.rawValue < $1.rawValue }
+        let offset = min(page.page - 1, permissions.count) * page.per
+        let items = permissions.dropFirst(offset).prefix(page.per).map {
+            PermissionDTO(permission: $0.rawValue, level: $0.level)
+        }
+        return Page(items: items, metadata: .init(page: page.page, per: page.per, total: permissions.count))
     }
 
     @Sendable

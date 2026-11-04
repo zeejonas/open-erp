@@ -1413,3 +1413,130 @@ private func requireStatus(_ response: TestingHTTPResponse, _ status: HTTPStatus
 private func failureReason(_ response: TestingHTTPResponse) throws -> String {
     try response.content.decode(Problem.self, as: .json).detail
 }
+
+extension OpenERPTests {
+    @Test func administratorContinuity() async throws {
+        try await withApp { app in
+            let tenant = try await makeTenant(app, code: "GUARD", subject: "guard-admin")
+            let orgID = tenant.organizationID
+            let admin = tenant.admin
+            let group = try #require(try await AccessGroup.query(on: app.db, organizationID: orgID).first())
+            let role = try #require(try await Role.query(on: app.db, organizationID: orgID).first())
+            let groupID = try group.requireID()
+            let roleID = try role.requireID()
+            let memberPath = "organization-users/\(admin.id)"
+            for path in [memberPath, "groups/\(groupID)/members/\(admin.id)", "groups/\(groupID)/roles/\(roleID)"] {
+                let result = try await api(app, .DELETE, path, token: admin.token, organizationID: orgID)
+                try requireStatus(result, .conflict)
+                #expect(try failureReason(result).contains("last administrator"))
+            }
+            let narrowed = Permission.allCases.filter { $0 != .companyRead }.map(\.rawValue)
+            let update = try await api(app, .PATCH, "roles/\(roleID)", token: admin.token, organizationID: orgID,
+                json: try json(PatchRoleDTO(permissions: narrowed)))
+            try requireStatus(update, .conflict)
+            #expect(try failureReason(update).contains("last administrator"))
+
+            let other = try await signedMember(app, organizationID: orgID, email: "backup@example.com",
+                subject: "backup", permissions: Permission.allCases)
+            try requireStatus(try await api(app, .DELETE, memberPath, token: admin.token, organizationID: orgID), .noContent)
+            let partial = try await signedMember(app, organizationID: orgID, email: "partial@example.com",
+                subject: "partial", permissions: [.organizationUserDelete])
+            // Simulate a catalog change that leaves the remaining administrator with partial access.
+            let otherRole = try #require(try await Role.query(on: app.db, organizationID: orgID)
+                .filter(\.$name == "permissions-backup@example.com").first())
+            try await RolePermission.query(on: app.db).filter(\.$role.$id == otherRole.requireID())
+                .filter(\.$permission == Permission.companyRead.rawValue).delete()
+            try requireStatus(try await api(app, .DELETE, "organization-users/\(other.id)", token: partial.token,
+                organizationID: orgID), .noContent)
+        }
+    }
+
+    @Test func concurrentAdministratorRemovals() async throws {
+        try await withApp { app in
+            let tenant = try await makeTenant(app, code: "RACE", subject: "race-first")
+            let second = try await signedMember(app, organizationID: tenant.organizationID,
+                email: "race-second@example.com", subject: "race-second", permissions: Permission.allCases)
+            async let firstResult = api(app, .DELETE, "organization-users/\(tenant.admin.id)",
+                token: tenant.admin.token, organizationID: tenant.organizationID)
+            async let secondResult = api(app, .DELETE, "organization-users/\(second.id)",
+                token: second.token, organizationID: tenant.organizationID)
+            let statuses = try await [firstResult.status.code, secondResult.status.code]
+            #expect(statuses.sorted() == [204, 409])
+            let access = try await AccessSnapshot.load(organizationID: tenant.organizationID, on: app.db)
+            #expect(access.administrators.count == 1)
+        }
+    }
+
+    @Test func heldAdministratorRemovalsAreRechecked() async throws {
+        try await withApp { app in
+            let tenant = try await makeTenant(app, code: "HELD", subject: "held-first")
+            let orgID = tenant.organizationID
+            let second = try await signedMember(app, organizationID: orgID, email: "held-second@example.com",
+                subject: "held-second", permissions: Permission.allCases)
+            let requester = try await signedMember(app, organizationID: orgID, email: "requester@example.com",
+                subject: "requester", permissions: [.organizationUserDelete])
+            let pool = try await makePool(app, organizationID: orgID, name: "Approval", prefix: "held-pool", count: 1)
+            try requireStatus(try await postPolicy(app, tenant: tenant,
+                policy(name: "Member removal", permission: .organizationUserDelete, stages: [(pool.groupID, 1)])), .ok)
+            let first = try heldRequest(try await api(app, .DELETE, "organization-users/\(tenant.admin.id)",
+                token: requester.token, organizationID: orgID))
+            let last = try heldRequest(try await api(app, .DELETE, "organization-users/\(second.id)",
+                token: requester.token, organizationID: orgID))
+            let applied = try await approve(app, tenant: tenant, requestID: first.id, member: pool.members[0])
+            #expect(applied.status == "applied")
+            let failed = try await approve(app, tenant: tenant, requestID: last.id, member: pool.members[0])
+            #expect(failed.status == "failed")
+            #expect(failed.failureReason?.contains("last administrator") == true)
+            let access = try await AccessSnapshot.load(organizationID: orgID, on: app.db)
+            #expect(access.administrators == [second.id])
+        }
+    }
+
+    @Test func policySatisfiabilityAndRemoval() async throws {
+        try await withApp { app in
+            let tenant = try await makeTenant(app, code: "SAT", subject: "sat-admin")
+            let orgID = tenant.organizationID
+            let requesterPool = try #require(try await AccessGroup.query(on: app.db, organizationID: orgID).first()).requireID()
+            let security = try await makePool(app, organizationID: orgID, name: "Security", prefix: "sat-sec", count: 1)
+            let it = try await makePool(app, organizationID: orgID, name: "IT", prefix: "sat-it", count: 0)
+            let approver = security.members[0]
+            try await addToGroup(app, groupID: it.groupID, userID: approver.id, organizationID: orgID)
+            for (name, slots) in [("Sole requester", [(requesterPool, 1)]), ("Shared approver", [(security.groupID, 1), (it.groupID, 1)])] {
+                let response = try await postPolicy(app, tenant: tenant,
+                    policy(name: name, permission: .companyUpdate, stages: slots))
+                try requireStatus(response, .badRequest)
+                #expect(try failureReason(response).contains("Stage 1"))
+            }
+            try requireStatus(try await postPolicy(app, tenant: tenant,
+                policy(name: "Independent approver", permission: .companyUpdate, stages: [(security.groupID, 1)])), .ok)
+            for path in ["groups/\(security.groupID)/members/\(approver.id)", "organization-users/\(approver.id)"] {
+                let response = try await api(app, .DELETE, path, token: tenant.admin.token, organizationID: orgID)
+                try requireStatus(response, .conflict)
+                #expect(try failureReason(response).contains("Independent approver"))
+            }
+
+            _ = try await signedMember(app, organizationID: orgID, email: "inviter@example.com",
+                subject: "inviter", permissions: [.organizationInvitationCreate])
+            let invitationPool = try #require(try await AccessGroup.query(on: app.db, organizationID: orgID)
+                .filter(\.$name == "permissions-inviter@example.com").first()).requireID()
+            let invitationPolicy = try await postPolicy(app, tenant: tenant,
+                policy(name: "Invitation approval", permission: .groupMemberCreate, stages: [(invitationPool, 1)]))
+            try requireStatus(invitationPolicy, .badRequest)
+            #expect(try failureReason(invitationPolicy).contains("Stage 1"))
+
+            let second = try await signedMember(app, organizationID: orgID, email: "sat-second@example.com",
+                subject: "sat-second", permissions: [.companyUpdate])
+            try await addToGroup(app, groupID: requesterPool, userID: second.id, organizationID: orgID)
+            try requireStatus(try await postPolicy(app, tenant: tenant,
+                policy(name: "Two possible requesters", permission: .companyUpdate, stages: [(requesterPool, 1)])), .ok)
+
+            // Granting a gated permission can leave an existing policy unsatisfiable.
+            let role = try #require(try await Role.query(on: app.db, organizationID: orgID)
+                .filter(\.$name == "permissions-sat-second@example.com").first())
+            try await GroupRole(groupID: security.groupID, roleID: role.requireID(), createdByID: tenant.admin.id)
+                .create(on: app.db)
+            try requireStatus(try await api(app, .DELETE, "groups/\(security.groupID)/members/\(approver.id)",
+                token: tenant.admin.token, organizationID: orgID), .noContent)
+        }
+    }
+}

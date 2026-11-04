@@ -23,6 +23,8 @@ struct OpenAPIExportTests {
                 let data = try Data(contentsOf: destination)
                 exports.append(data)
                 let document = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+                let paths = try #require(document["paths"] as? [String: [String: Any]])
+                #expect(paths.values.reduce(0) { $0 + $1.count } == 57)
                 try await app.testing().test(.GET, "openapi.json", afterResponse: { response async throws in
                     #expect(response.status == .ok)
                     let http = try #require(JSONSerialization.jsonObject(with: Data(response.body.readableBytesView)) as? NSDictionary)
