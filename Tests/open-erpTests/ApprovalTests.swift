@@ -518,9 +518,11 @@ extension OpenERPTests {
             let securityApproval = try await approve(app, tenant: tenant, requestID: parallel.id, member: security.members[0])
             #expect(securityApproval.status == "pending")
             #expect(securityApproval.tracks[0].currentStage == 1)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: security.members[0].token).items.isEmpty)
             #expect(try await Company.find(parallelCompany, on: app.db)?.name == "Company PARA")
             let itApproval = try await approve(app, tenant: tenant, requestID: parallel.id, member: it.members[0])
             #expect(itApproval.status == "applied")
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: it.members[0].token).items.isEmpty)
             #expect(try await Company.find(parallelCompany, on: app.db)?.name == "Parallel")
 
             let soloCompany = try await company("SOLO")
@@ -541,11 +543,13 @@ extension OpenERPTests {
 
             let removedCompany = try await company("REMV")
             let removed = try await rename(app, tenant: tenant, companyID: removedCompany, name: "Removed", token: clerk.token)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: temporary.token).items.map(\.id) == [removed.id])
             let removal = try await api(
                 app, .DELETE, "groups/\(security.groupID)/members/\(temporary.id)",
                 token: tenant.admin.token, organizationID: orgID
             )
             try requireStatus(removal, .noContent)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: temporary.token).items.isEmpty)
             let removedApproval = try await api(
                 app, .POST, "approval-requests/\(removed.id)/approve",
                 token: temporary.token, organizationID: orgID
@@ -556,6 +560,7 @@ extension OpenERPTests {
             try await join(app, tenant: tenant, groupID: security.groupID, userID: clerk.id)
             let ownCompany = try await company("OWNR")
             let own = try await rename(app, tenant: tenant, companyID: ownCompany, name: "Own", token: clerk.token)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: clerk.token).items.isEmpty)
             let selfApproval = try await api(
                 app, .POST, "approval-requests/\(own.id)/approve",
                 token: clerk.token, organizationID: orgID
@@ -596,6 +601,7 @@ extension OpenERPTests {
             try requireStatus(staged, .ok)
             let stagedCompany = try await company("STAG")
             let stagedRequest = try await rename(app, tenant: tenant, companyID: stagedCompany, name: "Staged", token: clerk.token)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: cfo.members[0].token).items.isEmpty)
             let early = try await api(
                 app, .POST, "approval-requests/\(stagedRequest.id)/approve",
                 token: cfo.members[0].token, organizationID: orgID
@@ -604,6 +610,7 @@ extension OpenERPTests {
             let stageOne = try await approve(app, tenant: tenant, requestID: stagedRequest.id, member: security.members[0])
             #expect(stageOne.status == "pending")
             #expect(stageOne.tracks[0].currentStage == 2)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: cfo.members[0].token).items.map(\.id) == [stagedRequest.id])
             let stageTwo = try await approve(app, tenant: tenant, requestID: stagedRequest.id, member: cfo.members[0])
             #expect(stageTwo.status == "applied")
             try requireStatus(
@@ -629,6 +636,21 @@ extension OpenERPTests {
             #expect(countedApproval.status == "applied")
             #expect(countedApproval.decisions.count == 2)
             #expect(Set(countedApproval.decisions.map(\.trackId)) == Set(counted.tracks.map(\.id)))
+
+            let firstTrackID = try #require(try firstTrack.content.decode(GetApprovalPolicyDTO.self).id)
+            try requireStatus(try await api(
+                app, .PATCH, "approval-policies/\(firstTrackID)",
+                token: tenant.admin.token, organizationID: orgID,
+                json: try json(policy(name: "Track one", permission: .companyUpdate, stages: [(security.groupID, 2)]))
+            ), .ok)
+            let partialCompany = try await company("PART")
+            let partial = try await rename(app, tenant: tenant, companyID: partialCompany, name: "Partial", token: clerk.token)
+            let partialApproval = try await approve(app, tenant: tenant, requestID: partial.id, member: securityOnly)
+            #expect(partialApproval.status == "pending")
+            #expect(partialApproval.decisions.count == 1)
+            #expect(partialApproval.tracks.map(\.status) == ["pending", "pending"])
+            try await join(app, tenant: tenant, groupID: it.groupID, userID: securityOnly.id)
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: securityOnly.token).items.map(\.id) == [partial.id])
         }
     }
 
@@ -696,6 +718,7 @@ extension OpenERPTests {
             try await direct.save(on: app.db)
             let staleApproval = try await approve(app, tenant: tenant, requestID: staleRequest.id, member: approvers.members[0])
             #expect(staleApproval.status == "failed")
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: approvers.members[0].token).items.isEmpty)
             #expect(staleApproval.failureReason?.contains("changed") == true)
             #expect(staleApproval.decisions.map(\.kind) == ["approve"])
             #expect(try await Company.find(staleID, on: app.db)?.name == "Direct")
@@ -757,6 +780,64 @@ extension OpenERPTests {
             #expect(lostApproval.status == "failed")
             #expect(lostApproval.failureReason?.contains("company:update") == true)
             #expect(try await Company.find(lostID, on: app.db)?.name == "Still")
+        }
+    }
+
+    @Test("An eligible approver can list awaiting requests without read permission")
+    func approvalAwaitingMe() async throws {
+        try await withApp { app in
+            let tenant = try await makeTenant(app, code: "WAIT", subject: "awaiting-admin")
+            let orgID = tenant.organizationID
+            let approvers = try await makePool(app, organizationID: orgID, name: "Approvers", prefix: "awaiting", count: 1)
+            try requireStatus(try await postPolicy(
+                app, tenant: tenant,
+                policy(name: "Renames", permission: .companyUpdate, stages: [(approvers.groupID, 1)])
+            ), .ok)
+            let company = try #require(try await makeCompany(app, tenant: tenant, code: "WAIT", name: "Company").id)
+            let pending = try await rename(app, tenant: tenant, companyID: company, name: "Renamed", token: tenant.admin.token)
+            let token = approvers.members[0].token
+
+            try requireStatus(try await api(app, .GET, "approval-requests", token: token, organizationID: orgID), .forbidden)
+            let response = try await api(app, .GET, "approval-requests/awaiting-me", token: token, organizationID: orgID)
+            try requireStatus(response, .ok)
+            let page = try response.content.decode(Page<GetApprovalRequestDTO>.self)
+            #expect(page.items.map(\.id) == [pending.id])
+            #expect(page.metadata.total == 1)
+
+            let detail = try await api(app, .GET, "approval-requests/\(pending.id)", token: token, organizationID: orgID)
+            try requireStatus(detail, .ok)
+            #expect(try detail.content.decode(GetApprovalRequestDTO.self).id == pending.id)
+
+            // Move the first request to the front by updatedAt, independently of creation order.
+            let second = try await rename(app, tenant: tenant, companyID: company, name: "Another rename", token: tenant.admin.token)
+            let first = try #require(try await ApprovalRequest.find(pending.id, on: app.db))
+            first.updatedAt = .now
+            try await first.save(on: app.db)
+            let secondPage = try await awaitingApprovals(app, tenant: tenant, token: token, query: "page=2&per=1")
+            #expect(secondPage.items.map(\.id) == [second.id])
+            #expect(secondPage.metadata.page == 2)
+            #expect(secondPage.metadata.per == 1)
+            #expect(secondPage.metadata.total == 2)
+            let invalid = try await api(
+                app, .GET, "approval-requests/awaiting-me", token: token, organizationID: orgID, query: "status=pending"
+            )
+            try requireStatus(invalid, .badRequest)
+
+            let other = try await makeTenant(app, code: "WAITB", subject: "awaiting-other")
+            let nonMember = try await api(
+                app, .GET, "approval-requests/awaiting-me", token: token, organizationID: other.organizationID
+            )
+            try requireStatus(nonMember, .forbidden)
+            try await OrganizationUser(organizationID: other.organizationID, userID: approvers.members[0].id)
+                .save(on: app.db)
+            let empty = try await awaitingApprovals(app, tenant: other, token: token)
+            #expect(empty.items.isEmpty)
+            #expect(empty.metadata.total == 0)
+
+            let unauthenticated = try await app.sendRequest(.GET, "approval-requests/awaiting-me")
+            try requireStatus(unauthenticated, .unauthorized)
+            let noOrganization = try await api(app, .GET, "approval-requests/awaiting-me", token: token)
+            try requireStatus(noOrganization, .badRequest)
         }
     }
 
@@ -863,6 +944,7 @@ extension OpenERPTests {
                 token: clerk.token, organizationID: orgID
             )
             #expect(try withdrawn.content.decode(GetApprovalRequestDTO.self).status == "withdrawn")
+            #expect(try await awaitingApprovals(app, tenant: tenant, token: approvers.members[0].token).items.isEmpty)
             let late = try await api(
                 app, .POST, "approval-requests/\(rejectRequest.id)/approve",
                 token: approvers.members[0].token, organizationID: orgID
@@ -1277,6 +1359,20 @@ private func rolePermissions(_ app: Application, roleID: UUID) async throws -> [
         .all()
         .map(\.permission)
         .sorted()
+}
+
+private func awaitingApprovals(
+    _ app: Application,
+    tenant: Tenant,
+    token: String,
+    query: String? = nil
+) async throws -> Page<GetApprovalRequestDTO> {
+    let response = try await api(
+        app, .GET, "approval-requests/awaiting-me",
+        token: token, organizationID: tenant.organizationID, query: query
+    )
+    try requireStatus(response, .ok)
+    return try response.content.decode(Page<GetApprovalRequestDTO>.self)
 }
 
 private func api(

@@ -20,11 +20,8 @@ volumes:
 
 x-shared_environment: &shared_environment
   LOG_LEVEL: ${LOG_LEVEL:-debug}
-  OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER in .env or your shell}
-  OIDC_AUDIENCE: ${OIDC_AUDIENCE:?Set OIDC_AUDIENCE in .env or your shell}
-  OIDC_JWKS_URL: ${OIDC_JWKS_URL:?Set OIDC_JWKS_URL in .env or your shell}
-  OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:?Set OIDC_USERINFO_URL in .env or your shell}
   DATABASE_HOST: db
+  DATABASE_TLS_MODE: disable
   DATABASE_NAME: &db_name vapor_database
   DATABASE_USERNAME: &db_username vapor_username
   DATABASE_PASSWORD: &db_password vapor_password
@@ -36,6 +33,10 @@ services:
       context: .
     environment:
       <<: *shared_environment
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
+      OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-}
     depends_on:
       - db
     ports:

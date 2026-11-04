@@ -1,3 +1,5 @@
+import Fluent
+import PostgresNIO
 import Vapor
 
 struct ProblemMiddleware: AsyncMiddleware {
@@ -19,7 +21,7 @@ struct ProblemMiddleware: AsyncMiddleware {
             // Client errors stay out of logs beyond status and code, since their reasons and URLs may carry
             // submitted values. Server errors keep diagnostics, matching Vapor's `Logger.report(error:)`.
             var metadata: Logger.Metadata = ["status": "\(status.code)", "code": "\(code.rawValue)"]
-            if isServerError { metadata["error"] = "\(String(reflecting: error))" }
+            if isServerError { metadata["error"] = "\(Self.diagnostics(for: error))" }
             request.logger.log(level: isServerError ? .error : .warning, "Request failed", metadata: metadata)
 
             let response = Response(status: status, headers: headers)
@@ -27,6 +29,29 @@ struct ProblemMiddleware: AsyncMiddleware {
             response.headers.contentType = .problemJSON
             return response
         }
+    }
+
+    static func diagnostics(for error: any Error) -> String {
+        if let postgres = error as? PSQLError {
+            let info = postgres.serverInfo
+            let fields = [
+                ("sqlstate", info?[.sqlState]),
+                ("table", info?[.tableName]),
+                ("constraint", info?[.constraintName]),
+                ("column", info?[.columnName]),
+            ]
+            return (["PSQLError", "code=\(postgres.code)"] + fields.compactMap { name, value in
+                value.map { "\(name)=\($0)" }
+            }).joined(separator: " ")
+        }
+        if let decoding = error as? PostgresDecodingError {
+            return "PostgresDecodingError column=\(decoding.columnName)"
+        }
+        if let fluent = error as? FluentError, case .invalidField(let name, _, _) = fluent {
+            // Fluent may wrap PostgreSQL decoding errors and include the raw row value.
+            return "FluentError.invalidField column=\(name)"
+        }
+        return String(reflecting: error)
     }
 }
 

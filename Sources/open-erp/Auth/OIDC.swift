@@ -91,7 +91,23 @@ extension Application {
     }
 }
 
-func configureAuthentication(_ app: Application) async throws {
+func configureAuthentication(
+    _ app: Application,
+    lookup: (String) -> String? = Environment.get
+) async throws {
+    func nonEmptyEnvironment(_ name: String) -> String? {
+        guard let value = lookup(name), !value.isEmpty else { return nil }
+        return value
+    }
+
+    func requiredEnvironment(_ name: String) throws -> String {
+        guard let value = nonEmptyEnvironment(name) else {
+            throw MissingEnvironmentVariable(name: name)
+        }
+        return value
+    }
+
+    app.initializeSigningKeyState()
     let configuration: OIDCConfiguration
     if app.environment == .testing {
         configuration = OIDCConfiguration(
@@ -101,35 +117,28 @@ func configureAuthentication(_ app: Application) async throws {
         )
         let key = try ES256PrivateKey(backing: P256.Signing.PrivateKey())
         await app.jwt.keys.add(ecdsa: key)
+        app.signingKeysLoaded = true
     } else {
         configuration = OIDCConfiguration(
             issuer: try requiredEnvironment("OIDC_ISSUER"),
             audience: try requiredEnvironment("OIDC_AUDIENCE"),
             userinfoURL: try requiredEnvironment("OIDC_USERINFO_URL")
         )
-        let jwksURL = try requiredEnvironment("OIDC_JWKS_URL")
-        let response = try await app.client.get(URI(string: jwksURL))
-        guard response.status == .ok, let body = response.body, !body.readableBytesView.isEmpty else {
-            throw AuthenticationConfigurationError(message: "Failed to fetch JWKS from OIDC_JWKS_URL")
-        }
-        // jwt-kit 5.2 loads a JSON Web Key Set with `add(jwksJSON:)`.
-        try await app.jwt.keys.add(jwksJSON: String(buffer: body))
+        let jwksURL = URI(string: try requiredEnvironment("OIDC_JWKS_URL"))
+        // Initialize the JWT integration before the server starts accepting requests.
+        app.jwt.keys = JWTKeyCollection()
+        let client = app.client
+        app.lifecycle.use(JWKSRefresher {
+            let response = try await client.get(jwksURL) { $0.timeout = .seconds(10) }
+            guard response.status == .ok, let body = response.body else {
+                throw AuthenticationConfigurationError(message: "JWKS request returned status \(response.status.code)")
+            }
+            return Data(body.readableBytesView)
+        })
     }
 
     app.oidc = configuration
     app.userInfoFetcher = UserInfoFetcherBox(fetch: fetchUserInfo)
-}
-
-private func nonEmptyEnvironment(_ name: String) -> String? {
-    guard let value = Environment.get(name), !value.isEmpty else { return nil }
-    return value
-}
-
-private func requiredEnvironment(_ name: String) throws -> String {
-    guard let value = nonEmptyEnvironment(name) else {
-        throw MissingEnvironmentVariable(name: name)
-    }
-    return value
 }
 
 func fetchUserInfo(_ request: Request) async throws -> UserInfo {

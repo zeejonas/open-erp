@@ -15,6 +15,16 @@ struct ApprovalRequestController: RouteCollection {
                 auth: .bearer()
             )
             .problemResponses(.badRequest)
+        requests.get("awaiting-me", use: self.awaitingMe)
+            .openAPI(
+                summary: "List approval requests awaiting the caller",
+                description: "Requires active organization membership. Lists pending requests the caller can approve now, newest updatedAt first, then id ascending. Only page and per are accepted. Defaults are page 1 and per 25, with a maximum per of 100. Unknown or repeated query parameters return 400.",
+                query: .type(ListPage.self),
+                headers: .type(OrganizationHeaders.self),
+                response: .type(of: Page(items: [GetApprovalRequestDTO.example], metadata: .init(page: 1, per: 25, total: 1))),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest)
         requests.group(":requestID") { approval in
             approval.get(use: self.show)
                 .openAPI(
@@ -72,8 +82,6 @@ struct ApprovalRequestController: RouteCollection {
         let (filters, page) = try req.listParameters(ApprovalRequestListFilters.self)
         let permission = try requireGateablePermission(filters.permission)
         var approvals = ApprovalRequest.query(on: req.db, organizationID: req.organizationID)
-            .with(\.$tracks) { $0.with(\.$policyVersion) }
-            .with(\.$decisions)
         if let status = filters.status {
             approvals = approvals.filter(\.$status == status.rawValue)
         }
@@ -83,7 +91,25 @@ struct ApprovalRequestController: RouteCollection {
         if let requestedBy = filters.requestedBy {
             approvals = approvals.filter(\.$requestedBy.$id == requestedBy)
         }
-        let result = try await approvals.newestFirst(\.$updatedAt).paginate(page)
+        return try await list(approvals, page: page)
+    }
+
+    @Sendable
+    func awaitingMe(req: Request) async throws -> Page<GetApprovalRequestDTO> {
+        let (_, page) = try req.listParameters(NoFilters.self)
+        let ids = try await req.approvals.awaitingApprovalIDs()
+        let approvals = ApprovalRequest.query(on: req.db, organizationID: req.organizationID)
+            .filter(\.$status == ApprovalRequestStatus.pending.rawValue)
+            .filter(\.$id ~~ ids)
+        return try await list(approvals, page: page)
+    }
+
+    private func list(_ approvals: QueryBuilder<ApprovalRequest>, page: PageRequest) async throws -> Page<GetApprovalRequestDTO> {
+        let result = try await approvals
+            .with(\.$tracks) { $0.with(\.$policyVersion) }
+            .with(\.$decisions)
+            .newestFirst(\.$updatedAt)
+            .paginate(page)
         return Page(items: result.items.map { $0.toGetDTO() }, metadata: result.metadata)
     }
 
