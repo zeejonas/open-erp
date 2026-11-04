@@ -48,11 +48,9 @@ struct DatabaseSettings {
 
     func postgresConfiguration() throws -> SQLPostgresConfiguration {
         var configuration = TLSConfiguration.makeClientConfiguration()
-        var customContext: NIOSSLContext?
         if let caFile {
-            configuration.trustRoots = .file(caFile)
             do {
-                customContext = try NIOSSLContext(configuration: configuration)
+                configuration.trustRoots = .certificates(try NIOSSLCertificate.fromPEMFile(caFile))
             } catch {
                 throw InvalidValue(name: "DATABASE_CA_FILE")
             }
@@ -61,7 +59,7 @@ struct DatabaseSettings {
         let tls: PostgresConnection.Configuration.TLS
         switch tlsMode {
         case .require:
-            tls = .require(try customContext ?? NIOSSLContext(configuration: configuration))
+            tls = .require(try NIOSSLContext(configuration: configuration))
         case .disable:
             tls = .disable
         }

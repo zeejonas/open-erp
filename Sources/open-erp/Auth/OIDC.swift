@@ -128,7 +128,7 @@ func configureAuthentication(
         // Initialize the JWT integration before the server starts accepting requests.
         app.jwt.keys = JWTKeyCollection()
         let client = app.client
-        app.lifecycle.use(JWKSRefresher { _ in
+        app.lifecycle.use(JWKSRefresher {
             let response = try await client.get(jwksURL) { $0.timeout = .seconds(10) }
             guard response.status == .ok, let body = response.body else {
                 throw AuthenticationConfigurationError(message: "JWKS request returned status \(response.status.code)")

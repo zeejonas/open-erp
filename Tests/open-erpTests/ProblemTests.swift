@@ -1,6 +1,7 @@
 @testable import open_erp
 import Fluent
 import Logging
+import SQLKit
 import Testing
 import VaporTesting
 
@@ -102,6 +103,31 @@ struct ProblemTests {
         try await app.asyncShutdown()
     }
 
+    @Test("Validation identifies fields without echoing submitted values")
+    func validation() async throws {
+        let app = try await Application.make(.testing)
+        do {
+            configureProblemMiddleware(app)
+            app.post("validate") { req -> HTTPStatus in
+                try CreateCompanyDTO.validate(content: req)
+                return .ok
+            }
+            try await app.testing().test(.POST, "validate", beforeRequest: { req in
+                try req.content.encode(CreateCompanyDTO(code: "", name: "submitted-secret"))
+            }, afterResponse: { res async throws in
+                try expectBadRequest(res, naming: "code")
+                #expect(!res.body.string.contains("submitted-secret"))
+            })
+        } catch {
+            try await app.asyncShutdown()
+            throw error
+        }
+        try await app.asyncShutdown()
+    }
+}
+
+// These tests share the serialized database suite because withApp migrates and reverts the schema.
+extension OpenERPTests {
     @Test("A database constraint failure omits the submitted email from request logs")
     func databaseDiagnostics() async throws {
         try await withApp { app in
@@ -124,27 +150,53 @@ struct ProblemTests {
         }
     }
 
-    @Test("Validation identifies fields without echoing submitted values")
-    func validation() async throws {
-        let app = try await Application.make(.testing)
-        do {
-            configureProblemMiddleware(app)
-            app.post("validate") { req -> HTTPStatus in
-                try CreateCompanyDTO.validate(content: req)
+    @Test("A Fluent field decoding failure omits the email from request logs")
+    func fluentDecodingDiagnostics() async throws {
+        try await withApp { app in
+            let email = "private-fluent-row@example.com"
+            let user = try await createUser(on: app.db, email: email)
+            let id = try user.requireID()
+            app.get("decode") { req async throws -> HTTPStatus in
+                _ = try await InvalidEmailModel.find(id, on: req.db)
                 return .ok
             }
-            try await app.testing().test(.POST, "validate", beforeRequest: { req in
-                try req.content.encode(CreateCompanyDTO(code: "", name: "submitted-secret"))
-            }, afterResponse: { res async throws in
-                try expectBadRequest(res, naming: "code")
-                #expect(!res.body.string.contains("submitted-secret"))
-            })
-        } catch {
-            try await app.asyncShutdown()
-            throw error
+            try await checkDecodingDiagnostics(app, diagnostic: "FluentError.invalidField column=email", rowValue: email)
         }
-        try await app.asyncShutdown()
     }
+
+    @Test("A SQL row decoding failure omits the column value from request logs")
+    func sqlDecodingDiagnostics() async throws {
+        try await withApp { app in
+            let value = "private-sql-row"
+            app.get("decode") { req async throws -> HTTPStatus in
+                let sql = try #require(req.db as? any SQLDatabase)
+                let row = try #require(try await sql.raw("SELECT \(bind: value)::text AS n").first())
+                _ = try row.decode(column: "n", as: Int.self)
+                return .ok
+            }
+            try await checkDecodingDiagnostics(app, diagnostic: "PostgresDecodingError column=n", rowValue: value)
+        }
+    }
+}
+
+private final class InvalidEmailModel: Model, @unchecked Sendable {
+    static let schema = User.schema
+
+    @ID(key: .id) var id: UUID?
+    @Field(key: "email") var email: Int
+
+    init() {}
+}
+
+private func checkDecodingDiagnostics(_ app: Application, diagnostic: String, rowValue: String) async throws {
+    let capture = CapturingLogHandler()
+    app.logger = Logger(label: "problems") { _ in capture }
+    app.logger.logLevel = .warning
+    try await app.testing().test(.GET, "decode", afterResponse: { res async throws in
+        _ = try checkProblem(res, status: .internalServerError, code: .internalError)
+    })
+    #expect(capture.lines.contains { $0.contains(diagnostic) })
+    #expect(!capture.lines.contains { $0.contains(rowValue) })
 }
 
 @discardableResult

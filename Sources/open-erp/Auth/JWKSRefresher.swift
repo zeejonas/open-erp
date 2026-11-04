@@ -31,11 +31,11 @@ struct JWKSRefresher: LifecycleHandler {
         let keys: [Entry]
     }
 
-    let fetch: @Sendable (Application) async throws -> Data
+    let fetch: @Sendable () async throws -> Data
 
     func refresh(_ app: Application) async {
         do {
-            let entries = try JSONDecoder().decode(KeySet.self, from: await fetch(app)).keys
+            let entries = try JSONDecoder().decode(KeySet.self, from: await fetch()).keys
             let replacement = JWTKeyCollection()
             var loaded = 0
             for entry in entries {

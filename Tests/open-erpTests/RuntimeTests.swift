@@ -36,24 +36,24 @@ struct RuntimeTests {
             let newToken = try await signer.sign(token, kid: "new")
 
             app.initializeSigningKeyState()
-            await JWKSRefresher { _ in try encoded([oldJWK]) }.refresh(app)
+            await JWKSRefresher { try encoded([oldJWK]) }.refresh(app)
             #expect(app.signingKeysLoaded)
             _ = try await app.jwt.keys.verify(oldToken, as: AccessToken.self)
 
-            await JWKSRefresher { _ in try encoded([oldJWK, newJWK]) }.refresh(app)
+            await JWKSRefresher { try encoded([oldJWK, newJWK]) }.refresh(app)
             _ = try await app.jwt.keys.verify(oldToken, as: AccessToken.self)
             _ = try await app.jwt.keys.verify(newToken, as: AccessToken.self)
 
-            await JWKSRefresher { _ in try encoded([newJWK]) }.refresh(app)
+            await JWKSRefresher { try encoded([newJWK]) }.refresh(app)
             await #expect(throws: JWTError.self) {
                 _ = try await app.jwt.keys.verify(oldToken, as: AccessToken.self)
             }
             let retained = app.jwt.keys
-            await JWKSRefresher { _ in throw Abort(.badGateway) }.refresh(app)
+            await JWKSRefresher { throw Abort(.badGateway) }.refresh(app)
             #expect(app.jwt.keys === retained)
-            await JWKSRefresher { _ in try encoded([]) }.refresh(app)
+            await JWKSRefresher { try encoded([]) }.refresh(app)
             #expect(app.jwt.keys === retained)
-            await JWKSRefresher { _ in try encoded([.rsa(.rsaOAEP, identifier: "encryption", modulus: nil, exponent: nil)]) }.refresh(app)
+            await JWKSRefresher { try encoded([.rsa(.rsaOAEP, identifier: "encryption", modulus: nil, exponent: nil)]) }.refresh(app)
             #expect(app.jwt.keys === retained)
             _ = try await app.jwt.keys.verify(newToken, as: AccessToken.self)
         }
@@ -85,12 +85,12 @@ struct RuntimeTests {
             let second = try keySet(try jwk(newKey, kid: "new"))
 
             app.initializeSigningKeyState()
-            await JWKSRefresher { _ in first }.refresh(app)
+            await JWKSRefresher { first }.refresh(app)
             #expect(app.signingKeysLoaded)
             _ = try await app.jwt.keys.verify(oldToken, as: AccessToken.self)
             #expect(capture.lines.last == #"Ignored unusable JWKS entries ["ignored": 4]"#)
 
-            await JWKSRefresher { _ in second }.refresh(app)
+            await JWKSRefresher { second }.refresh(app)
             _ = try await app.jwt.keys.verify(newToken, as: AccessToken.self)
             await #expect(throws: JWTError.self) {
                 _ = try await app.jwt.keys.verify(oldToken, as: AccessToken.self)
@@ -103,9 +103,9 @@ struct RuntimeTests {
             let capture = CapturingLogHandler()
             app.logger = Logger(label: "runtime") { _ in capture }
             app.initializeSigningKeyState()
-            await JWKSRefresher { _ in throw AuthenticationConfigurationError(message: "JWKS request returned status 404") }.refresh(app)
+            await JWKSRefresher { throw AuthenticationConfigurationError(message: "JWKS request returned status 404") }.refresh(app)
             #expect(capture.lines.last?.contains("status 404") == true)
-            await JWKSRefresher { _ in try encoded([]) }.refresh(app)
+            await JWKSRefresher { try encoded([]) }.refresh(app)
             #expect(capture.lines.last?.contains("no usable keys") == true)
             #expect(!app.signingKeysLoaded)
         }
