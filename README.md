@@ -119,6 +119,7 @@ accept those cookies, or require clients to access its database. Use HTTPS in de
 | `/platform/organizations` and its subroutes | Yes | No | Platform administrator |
 | `POST /invitations/accept` | Yes | No | Valid invitation and verified matching email; user binding may be created here |
 | `POST /auth/logout` | Yes | Forbidden | Standard JWT validation; user binding and membership unnecessary |
+| `GET /approval-requests/awaiting-me` | Yes | Required | Active membership. Results include only pending requests the caller can approve. |
 | Organization, company, user, membership, role, group and approval routes | Yes | Required | Active membership and the route's stated ERP permission |
 
 For invitation acceptance, request `openid profile email` and the ERP API audience

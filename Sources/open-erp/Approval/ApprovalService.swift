@@ -30,6 +30,25 @@ struct ApprovalService {
         }
     }
 
+    func awaitingApprovalIDs() async throws -> [UUID] {
+        let userID = try request.userID()
+        let organizationID = request.organizationID
+        let db = request.db
+        let pending = try await ApprovalRequest.query(on: db, organizationID: organizationID)
+            .filter(\.$status == ApprovalRequestStatus.pending.rawValue)
+            .all()
+        var ids: [UUID] = []
+        for approval in pending {
+            let tracks = try await eligibleTracks(
+                approval, userID: userID, organizationID: organizationID, approving: true, on: db
+            )
+            if !tracks.isEmpty {
+                ids.append(try approval.requireID())
+            }
+        }
+        return ids
+    }
+
     func approve(_ requestID: UUID) async throws -> GetApprovalRequestDTO {
         let userID = try request.userID()
         let organizationID = request.organizationID

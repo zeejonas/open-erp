@@ -99,6 +99,7 @@ Organization-scoped routes SHALL require these permissions. A gateable write SHA
 | `PATCH /approval-policies/:id` | `approval_policy:update` |
 | `DELETE /approval-policies/:id` | `approval_policy:delete` |
 | `GET /approval-requests` | `approval_request:read` |
+| `GET /approval-requests/awaiting-me` | None; active membership, with results limited to requests the caller can approve |
 | `GET /approval-requests/:id` | `approval_request:read`, or the requester, or a currently eligible approver |
 | `POST /approval-requests/:id/override` | `approval_override:create` |
 
