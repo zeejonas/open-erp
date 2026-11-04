@@ -1,14 +1,23 @@
 import Fluent
+import SQLKit
 import Vapor
 import VaporToOpenAPI
 
 func routes(_ app: Application) throws {
-    app.get { req async in
-        "It works!"
-    }.excludeFromOpenAPI()
-
-    app.get("hello") { req async -> String in
-        "Hello, world!"
+    app.get("health") { req async throws -> [String: String] in
+        // ProblemMiddleware logs these reasons and keeps the response generic.
+        guard req.application.signingKeysLoaded else {
+            throw Abort(.serviceUnavailable, reason: "Signing keys are not loaded")
+        }
+        guard let database = req.db as? any SQLDatabase else {
+            throw Abort(.serviceUnavailable, reason: "Database does not support SQL")
+        }
+        do {
+            try await database.raw("SELECT 1").run()
+        } catch {
+            throw Abort(.serviceUnavailable, reason: "Database probe failed: \(ProblemMiddleware.diagnostics(for: error))")
+        }
+        return ["status": "ok"]
     }.excludeFromOpenAPI()
 
     try app.register(collection: AuthController())

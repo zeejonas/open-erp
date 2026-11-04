@@ -1,4 +1,5 @@
 @testable import open_erp
+import Fluent
 import Logging
 import Testing
 import VaporTesting
@@ -99,6 +100,28 @@ struct ProblemTests {
             throw error
         }
         try await app.asyncShutdown()
+    }
+
+    @Test("A database constraint failure omits the submitted email from request logs")
+    func databaseDiagnostics() async throws {
+        try await withApp { app in
+            let email = "private-database-value@example.com"
+            try await createUser(on: app.db, email: email)
+            let capture = CapturingLogHandler()
+            app.logger = Logger(label: "problems") { _ in capture }
+            app.logger.logLevel = .warning
+            app.post("duplicate") { req async throws -> HTTPStatus in
+                try await createUser(on: req.db, email: email)
+                return .created
+            }
+            try await app.testing().test(.POST, "duplicate", afterResponse: { res async throws in
+                _ = try checkProblem(res, status: .internalServerError, code: .internalError)
+            })
+            let diagnostics = try #require(capture.lines.last)
+            #expect(diagnostics.contains("23505"))
+            #expect(diagnostics.contains("uq:users.email"))
+            #expect(!diagnostics.contains(email))
+        }
     }
 
     @Test("Validation identifies fields without echoing submitted values")

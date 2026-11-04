@@ -48,12 +48,39 @@ swift test
 ```
 
 For Docker, run `docker compose up -d app` after building the image. Compose
-reads the OIDC values from `.env` or your shell and passes them to the app,
-migrate, and revert containers at runtime. `.env` files are excluded from the
-image build context. After changing `.env`, run `docker compose up -d app` again
-to recreate the container with the new values; no image rebuild or terminal
-reload is needed. `docker compose restart` does not reload environment values.
+passes OIDC settings from `.env` or your shell to the API server. The
+`migrate`, `prune-revoked-tokens`, `platform-admin`, and `approval-override`
+commands require database settings and can run without OIDC configuration or
+provider access. After changing `.env`, run `docker compose up -d app` again
+to recreate the container with the new settings.
 See [Docker's environment configuration](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
+
+## Database configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_HOST`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Required outside testing. |
+| `DATABASE_PORT` | PostgreSQL port, default `5432`. |
+| `DATABASE_TLS_MODE` | Defaults to `require`, which verifies the certificate chain and hostname. Testing defaults to `disable`. |
+| `DATABASE_CA_FILE` | Optional PEM bundle that replaces the system trust roots for PostgreSQL. The file must be readable and valid. |
+| `DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP` | Maximum connections per Vapor event loop, default `4`. |
+
+Add `DATABASE_TLS_MODE=disable` to an existing local `.env` when running the API
+against the plaintext Compose database. Compose sets this for its own API and
+migration containers. The app logs a warning when TLS is disabled outside testing.
+
+For direct Amazon RDS connections, use the RDS endpoint as `DATABASE_HOST` and
+set `DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem` when running the API image.
+For RDS Proxy, use its endpoint and the system trust store. RDS Proxy uses
+public ACM certificates. [Amazon RDS TLS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
+
+Budget up to `connections per event loop × event loops per instance × instance count`
+against PostgreSQL's `max_connections`. Leave room for operational commands,
+other clients, and overlapping instances during a rollout.
+
+Point the load balancer's readiness check at `GET /health`. It returns
+`{"status":"ok"}` after a successful database probe when signing keys are loaded,
+or a generic 503 problem when either dependency is unavailable.
 
 ## API documentation
 
@@ -99,10 +126,17 @@ requires matching `iss`, an `aud` containing the configured audience, and a futu
 session cookie. No provider-specific `jti`, roles, or permissions claim is required;
 ERP memberships and permissions determine authorization.
 
+The server fetches signing keys in the background and retries every 30 seconds
+until the first success. After that it refreshes every five minutes and retains
+the last good keys during provider outages. It ignores JWKS entries it cannot use
+for signature verification, such as encryption keys, and logs how many it ignored.
+Publish new keys before signing with them to allow time for the next refresh.
+Requests with bearer tokens receive `authentication_unavailable` until the first
+successful fetch.
+
 The issuer controls expiration. Recommend 10-minute access tokens in the provider's
 API configuration; the ERP does not enforce a maximum lifetime. Short expiry limits
-exposure but does not replace revocation. JWKS is loaded at application startup;
-coordinate key changes with serving instances.
+exposure and complements revocation.
 
 Clients own their login and session architecture. Browser and native mobile clients
 can use Authorization Code with PKCE through their provider SDK. Keep browser tokens
@@ -114,7 +148,8 @@ accept those cookies, or require clients to access its database. Use HTTPS in de
 
 | Route class | Bearer access token | `X-Organization-ID` | Additional authorization |
 | --- | --- | --- | --- |
-| `/`, `/hello`, `/docs`, `/openapi.json` | No | No | Public metadata/health examples |
+| `GET /health` | No | No | Database and signing-key readiness |
+| `GET /docs`, `GET /openapi.json` | No | No | Public API documentation |
 | `/me`, `/me/organizations` | Yes | No | Bound, active ERP user |
 | `/platform/organizations` and its subroutes | Yes | No | Platform administrator |
 | `POST /invitations/accept` | Yes | No | Valid invitation and verified matching email; user binding may be created here |
@@ -255,7 +290,7 @@ matches the HTTP status; `type` is always `urn:open-erp:problem:<code>`.
 | 401 | `unauthorized` | Supply a bearer access token. |
 | 401 | `invalid_access_token` | Obtain a valid access token; verification rejected the supplied token. |
 | 401 | `access_token_revoked` | Stop using this token; require an intentional new login when appropriate. |
-| 503 | `authentication_unavailable` | Retry later; authentication storage is unavailable and logout is unconfirmed. |
+| 503 | `authentication_unavailable` | Retry later. Signing keys or the revocation store are unavailable. If this occurred during logout, revocation is unconfirmed. |
 | 403 | `forbidden` | Check membership and permissions; repeating the request cannot grant access. |
 | 404 | `not_found` | Check the route or resource within the selected organization. |
 | 409 | `conflict` | Reload the resource and resolve the conflicting state. |

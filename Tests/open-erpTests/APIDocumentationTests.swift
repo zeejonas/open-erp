@@ -23,11 +23,12 @@ struct APIDocumentationTests {
                 let paths = try #require(document["paths"] as? [String: [String: [String: Any]]])
                 #expect(paths["/docs"] == nil)
                 #expect(paths["/openapi.json"] == nil)
+                #expect(paths["/health"] == nil)
                 #expect(paths["/hello"] == nil)
                 #expect(paths["/"] == nil)
 
                 // Catch forgotten annotations and silent schema-generation failures on any route.
-                for route in app.routes.all where !["/", "/hello", "/docs", "/openapi.json"].contains("/" + route.path.map(\.description).joined(separator: "/")) {
+                for route in app.routes.all where !["/health", "/docs", "/openapi.json"].contains("/" + route.path.map(\.description).joined(separator: "/")) {
                     let path = "/" + route.path.map { component in
                         let value = component.description
                         return value.hasPrefix(":") ? "{\(value.dropFirst())}" : value

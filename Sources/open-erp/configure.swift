@@ -1,13 +1,13 @@
-import NIOSSL
 import Fluent
 import FluentPostgresDriver
 import Vapor
 
 /// configures your application
-func configure(_ app: Application) async throws {
+func configure(_ app: Application, serving: Bool = true) async throws {
     // API setup resets middleware, so it runs before services.
     try configureAPI(app)
-    try await configureServices(app)
+    try configureServices(app)
+    if serving { try await configureAuthentication(app) }
 }
 
 /// Registers the HTTP contract without runtime services or credentials.
@@ -20,15 +20,16 @@ func configureAPI(_ app: Application) throws {
 }
 
 /// Configures dependencies required by serving and operational commands.
-func configureServices(_ app: Application) async throws {
-    app.databases.use(DatabaseConfigurationFactory.postgres(configuration: .init(
-        hostname: Environment.get("DATABASE_HOST") ?? "localhost",
-        port: Environment.get("DATABASE_PORT").flatMap(Int.init(_:)) ?? SQLPostgresConfiguration.ianaPortNumber,
-        username: Environment.get("DATABASE_USERNAME") ?? "vapor_username",
-        password: Environment.get("DATABASE_PASSWORD") ?? "vapor_password",
-        database: Environment.get("DATABASE_NAME") ?? "vapor_database",
-        tls: .prefer(try .init(configuration: .clientDefault)))
+func configureServices(_ app: Application) throws {
+    let testing = app.environment == .testing
+    let database = try DatabaseSettings(testing: testing, lookup: Environment.get)
+    app.databases.use(.postgres(
+        configuration: try database.postgresConfiguration(),
+        maxConnectionsPerEventLoop: database.maxConnectionsPerEventLoop
     ), as: .psql)
+    if database.tlsMode == .disable && !testing {
+        app.logger.warning("Database TLS is disabled")
+    }
 
     // Fluent clamps an oversized page. Handlers reject it first; this limit is the backstop.
     app.fluent.pagination.pageSizeLimit = 100
@@ -53,7 +54,6 @@ func configureServices(_ app: Application) async throws {
     app.migrations.add(CreateApprovalDecision())
     app.migrations.add(CreateOrganizationInvitation())
 
-    try await configureAuthentication(app)
     app.asyncCommands.use(PruneRevokedTokensCommand(), as: "prune-revoked-tokens")
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
     app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")

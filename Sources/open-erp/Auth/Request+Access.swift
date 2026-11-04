@@ -63,6 +63,9 @@ extension Request {
         guard let bearer = headers.bearerAuthorization?.token else {
             throw Abort(.unauthorized)
         }
+        guard application.signingKeysLoaded else {
+            throw ProblemAbort(status: .serviceUnavailable, code: .authenticationUnavailable)
+        }
         let token: AccessToken
         do {
             token = try await jwt.verify(bearer, as: AccessToken.self)
