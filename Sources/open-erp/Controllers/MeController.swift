@@ -20,6 +20,15 @@ struct MeController: RouteCollection {
                 auth: .bearer()
             )
             .problemResponses(.badRequest, .payloadTooLarge, .unsupportedMediaType)
+        authed.grouped(OrganizationMiddleware()).get("me", "access", use: self.access)
+            .openAPI(
+                summary: "Get my organization access",
+                description: "Requires active membership. Returns effective permissions in ascending order.",
+                headers: .type(OrganizationHeaders.self),
+                response: .type(CallerAccessDTO.self),
+                auth: .bearer()
+            )
+            .problemResponses(.badRequest)
         authed.get("me", "organizations", use: self.organizations)
             .openAPI(
                 summary: "List my organizations",
@@ -29,6 +38,11 @@ struct MeController: RouteCollection {
                 auth: .bearer()
             )
             .problemResponses(.badRequest)
+    }
+
+    @Sendable
+    func access(req: Request) async throws -> CallerAccessDTO {
+        CallerAccessDTO(organizationId: req.organizationID, permissions: req.permissions.map(\.rawValue).sorted())
     }
 
     @Sendable

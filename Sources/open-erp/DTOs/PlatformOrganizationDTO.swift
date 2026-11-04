@@ -10,6 +10,8 @@ struct PlatformOrganizationDTO: Content {
     var createdAt: Date?
     var updatedAt: Date?
     var onboardedAt: Date?
+    var deletedAt: Date?
+    var deletedById: UUID?
 
     init(_ organization: Organization) throws {
         id = try organization.requireID()
@@ -20,7 +22,13 @@ struct PlatformOrganizationDTO: Content {
         createdAt = organization.createdAt
         updatedAt = organization.updatedAt
         onboardedAt = organization.onboardedAt
+        deletedAt = organization.deletedAt
+        deletedById = organization.$deletedBy.id
     }
+}
+
+struct RestoreOrganizationDTO: Content {
+    var reason: String
 }
 
 struct PlatformOnboardingInvitationDTO: Content {

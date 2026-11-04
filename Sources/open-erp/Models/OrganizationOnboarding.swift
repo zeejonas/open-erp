@@ -6,11 +6,13 @@ import Vapor
 /// Organization locking always precedes the definitive invitation lookup.
 /// NO KEY UPDATE still serializes onboarding writers, but unlike FOR UPDATE it does not block the
 /// FOR KEY SHARE that foreign-key checks take, so tenant writes holding other row locks cannot deadlock with it.
-func lockOrganization(_ id: UUID, on db: any Database) async throws -> Organization {
+func lockOrganization(_ id: UUID, includingDeleted: Bool = false, on db: any Database) async throws -> Organization {
     guard let sql = db as? any SQLDatabase else { throw Abort(.internalServerError) }
     let rows = try await sql.select().column("id").from(Organization.schema)
         .where("id", .equal, SQLBind(id)).lockingClause(SQLRaw("FOR NO KEY UPDATE")).all()
-    guard !rows.isEmpty, let organization = try await Organization.find(id, on: db) else {
+    let query = Organization.query(on: db).filter(\.$id == id)
+    if includingDeleted { query.withDeleted() }
+    guard !rows.isEmpty, let organization = try await query.first() else {
         throw Abort(.notFound)
     }
     return organization

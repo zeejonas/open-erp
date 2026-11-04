@@ -57,13 +57,14 @@ Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1),
 - **THEN** the system responds `400` and names `level`
 
 ### Requirement: Fixed list order
-Every list SHALL be ordered newest first by the listed model's `updatedAt`, or by `createdAt` when the model has no `updatedAt`, and then by `id`. No list endpoint SHALL accept a sort parameter.
+Every list backed by timestamped rows SHALL be ordered newest first by the listed model's `updatedAt`, or by `createdAt` when the model has no `updatedAt`, and then by `id`. No list endpoint SHALL accept a sort parameter.
 
 | Endpoint | Order |
 |---|---|
 | `GET /companies` | company `updatedAt` |
 | `GET /users` | user `updatedAt` |
 | `GET /roles` | role `updatedAt` |
+| `GET /permissions` | `permission` ascending |
 | `GET /groups` | group `updatedAt` |
 | `GET /me/organizations` | organization `updatedAt` |
 | `GET /groups/:groupID/members` | group membership `createdAt` |
@@ -92,6 +93,7 @@ Text filters SHALL match a case-insensitive substring, and `%`, `_`, and `\` in 
 | `GET /companies` | `code`, `name` | none |
 | `GET /users` | `firstName`, `lastName`, `email` | `groupId`: active members of that active group |
 | `GET /roles` | `name` | `level`: `organization` or `company` |
+| `GET /permissions` | none | `level`: `organization` or `company` |
 | `GET /groups` | `name` | `roleId`: groups with that role attached; `companyId`: groups eligible at that company |
 | `GET /organization-invitations` | `email` | `groupId` |
 | `GET /groups/:groupID/members` | none | none |
@@ -135,3 +137,22 @@ Text filters SHALL match a case-insensitive substring, and `%`, `_`, and `\` in 
 #### Scenario: Policies routing to a group
 - **WHEN** "Role changes" names group "Security" in a slot, "Company edits" does not, and a member with `approval_policy:read` calls `GET /approval-policies?groupId=<Security>`
 - **THEN** only "Role changes" is returned
+
+### Requirement: Permission catalog list
+`GET /permissions` SHALL use the standard paged envelope and strict parameters, and SHALL accept a `level` filter of `organization` or `company`. Its rows are defined in code and have no timestamp, so it SHALL order by `permission` ascending.
+
+#### Scenario: Filter by level
+- **WHEN** a member with `role:read` calls `GET /permissions?level=organization`
+- **THEN** only organization-level permissions are returned, in `permission` order, with `total` counting them
+
+#### Scenario: Undeclared parameter
+- **WHEN** a member calls `GET /permissions?name=x`
+- **THEN** the system responds `400` and names `name`
+
+#### Scenario: Read permission still required
+- **WHEN** a member without `role:read` calls `GET /permissions?level=organization`
+- **THEN** the system responds `403 Forbidden`
+
+#### Scenario: Tenant selection still required
+- **WHEN** a person who is not a member of the selected organization calls `GET /permissions`
+- **THEN** the system responds `403 Forbidden`

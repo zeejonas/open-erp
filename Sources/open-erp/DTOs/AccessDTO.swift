@@ -1,5 +1,15 @@
 import Vapor
 
+struct CallerAccessDTO: Content {
+    var organizationId: UUID
+    var permissions: [String]
+}
+
+struct PermissionDTO: Content {
+    var permission: String
+    var level: RoleLevel
+}
+
 struct PatchMeDTO: Content {
     var firstName: String?
     var lastName: String?
