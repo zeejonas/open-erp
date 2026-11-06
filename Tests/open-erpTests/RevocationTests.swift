@@ -38,6 +38,9 @@ extension OpenERPTests {
                 let retry = try #require(try await RevokedAccessToken.find(record.id, on: app.db))
                 #expect(retry.revokedAt == record.revokedAt)
                 #expect(try await RevokedAccessToken.query(on: app.db).count() == 1)
+                let audit = try #require(try await AuditEvent.query(on: app.db).filter(\.$tableName == "revoked_access_tokens").first())
+                #expect(audit.actorID == user.id)
+                #expect(audit.actorType == .user)
                 for current in [app, peer] {
                     for (path, org) in [("me", nil), ("companies", aID), ("companies", bID)] {
                         try await authorizedGet(current, path, token: token, organizationID: org) {
@@ -107,6 +110,15 @@ extension OpenERPTests {
             #expect(first.revokedAt >= before)
             #expect(try await User.query(on: app.db).count() == 0)
             try await logout(app, token: token)
+            let events = try await AuditEvent.query(on: app.db).filter(\.$tableName == "revoked_access_tokens").all()
+            #expect(events.count == 1)
+            let audit = try #require(events.first)
+            #expect(audit.actorType == .user)
+            #expect(audit.actorName == "unbound")
+            #expect(audit.actorID == nil)
+            #expect(audit.recordID == nil)
+            #expect(audit.changedFields.contains("fingerprint"))
+            #expect(audit.newValues?.values["fingerprint"] == nil)
             let event = try #require(capture.lines.first { $0.contains("Access token revoked") })
             #expect(event.contains("unbound"))
             #expect(event.contains(app.oidc.issuer))
@@ -189,6 +201,10 @@ extension OpenERPTests {
             var context = CommandContext(console: app.console, input: CommandInput(arguments: ["prune-revoked-tokens"]))
             context.application = app
             try await PruneRevokedTokensCommand().run(using: &context)
+            let deletions = try await AuditEvent.query(on: app.db)
+                .filter(\.$tableName == "revoked_access_tokens").filter(\.$operation == .delete).all()
+            #expect(deletions.count == 2)
+            #expect(deletions.allSatisfy { $0.actorType == .system && $0.actorName == "prune-revoked-tokens" })
             let cleanup = try #require(capture.lines.first { $0.contains("revocations pruned") })
             #expect(cleanup.contains("count") && cleanup.contains("1"))
             #expect(!capture.lines.contains { $0.contains(token) || $0.contains(RevokedAccessToken.fingerprint(token)) })

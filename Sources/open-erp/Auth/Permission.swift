@@ -39,6 +39,7 @@ enum Permission: String, Codable, CaseIterable, Sendable {
     case approvalPolicyDelete = "approval_policy:delete"
     case approvalRequestRead = "approval_request:read"
     case approvalOverrideCreate = "approval_override:create"
+    case auditEventRead = "audit_event:read"
 
     /// Every permission shipped in this change is organization-wide.
     /// Company-scoped permissions arrive with company-level enforcement.

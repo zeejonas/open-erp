@@ -674,8 +674,16 @@ extension OpenERPTests {
             let company = try await makeCompany(app, tenant: tenant, code: "MAIN", name: "Original")
             let companyID = try #require(company.id)
             let request = try await rename(app, tenant: tenant, companyID: companyID, name: "Approved", token: clerk.token)
+            #expect(try await AuditEvent.query(on: app.db).filter(\.$recordID == companyID).filter(\.$operation == .update).count() == 0)
+            let held = try #require(try await AuditEvent.query(on: app.db).filter(\.$recordID == request.id).first())
+            #expect(held.actorID == clerk.id)
             let applied = try await approve(app, tenant: tenant, requestID: request.id, member: approvers.members[0])
             #expect(applied.status == "applied")
+            let appliedEvent = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == companyID).filter(\.$operation == .update).first())
+            #expect(appliedEvent.actorType == .user)
+            #expect(appliedEvent.actorID == approvers.members[0].id)
+            #expect(appliedEvent.approvalRequestID == request.id)
             let saved = try #require(try await Company.find(companyID, on: app.db))
             #expect(saved.name == "Approved")
             #expect(saved.$updatedBy.id == clerk.id)
@@ -718,6 +726,10 @@ extension OpenERPTests {
             try await direct.save(on: app.db)
             let staleApproval = try await approve(app, tenant: tenant, requestID: staleRequest.id, member: approvers.members[0])
             #expect(staleApproval.status == "failed")
+            let failure = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == staleRequest.id).filter(\.$operation == .update).first())
+            #expect(failure.actorID == approvers.members[0].id)
+            #expect(failure.approvalRequestID == staleRequest.id)
             #expect(try await awaitingApprovals(app, tenant: tenant, token: approvers.members[0].token).items.isEmpty)
             #expect(staleApproval.failureReason?.contains("changed") == true)
             #expect(staleApproval.decisions.map(\.kind) == ["approve"])
@@ -928,6 +940,10 @@ extension OpenERPTests {
             try requireStatus(rejected, .ok)
             let rejectedBody = try rejected.content.decode(GetApprovalRequestDTO.self)
             #expect(rejectedBody.status == "rejected")
+            let rejection = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == pending.id).filter(\.$operation == .update).first())
+            #expect(rejection.actorID == approvers.members[0].id)
+            #expect(rejection.approvalRequestID == pending.id)
             #expect(rejectedBody.decisions.map(\.kind) == ["reject"])
             #expect(try await Company.find(pendingCompany, on: app.db)?.name == "Pending Co")
 
@@ -944,6 +960,10 @@ extension OpenERPTests {
                 token: clerk.token, organizationID: orgID
             )
             #expect(try withdrawn.content.decode(GetApprovalRequestDTO.self).status == "withdrawn")
+            let withdrawal = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == rejectRequest.id).filter(\.$operation == .update).first())
+            #expect(withdrawal.actorID == clerk.id)
+            #expect(withdrawal.approvalRequestID == rejectRequest.id)
             #expect(try await awaitingApprovals(app, tenant: tenant, token: approvers.members[0].token).items.isEmpty)
             let late = try await api(
                 app, .POST, "approval-requests/\(rejectRequest.id)/approve",
@@ -1030,6 +1050,11 @@ extension OpenERPTests {
             try await ApprovalOverrideCommand().run(using: &context)
             let stuckSaved = try #require(try await Company.find(stuckCompany, on: app.db))
             #expect(stuckSaved.name == "Unstuck")
+            let overrideEvent = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == stuckCompany).filter(\.$operation == .update).first())
+            #expect(overrideEvent.actorType == .operator)
+            #expect(overrideEvent.actorName == "Pat Operator")
+            #expect(overrideEvent.approvalRequestID == stuck.id)
             #expect(stuckSaved.$updatedBy.id == clerk.id)
             let stuckRequest = try await ApprovalRequest.query(on: app.db)
                 .filter(\.$id == stuck.id)
@@ -1226,7 +1251,7 @@ private func addToGroup(_ app: Application, groupID: UUID, userID: UUID, organiz
         .filter(\.$user.$id == userID)
         .filter(\.$organization.$id == organizationID)
         .first())
-    try await GroupMember(groupID: groupID, organizationUserID: try membership.requireID(), createdByID: nil).save(on: app.db)
+    try await GroupMember(organizationID: organizationID, groupID: groupID, organizationUserID: try membership.requireID(), createdByID: nil).save(on: app.db)
 }
 
 private func join(_ app: Application, tenant: Tenant, groupID: UUID, userID: UUID) async throws {
@@ -1533,7 +1558,7 @@ extension OpenERPTests {
             // Granting a gated permission can leave an existing policy unsatisfiable.
             let role = try #require(try await Role.query(on: app.db, organizationID: orgID)
                 .filter(\.$name == "permissions-sat-second@example.com").first())
-            try await GroupRole(groupID: security.groupID, roleID: role.requireID(), createdByID: tenant.admin.id)
+            try await GroupRole(organizationID: orgID, groupID: security.groupID, roleID: role.requireID(), createdByID: tenant.admin.id)
                 .create(on: app.db)
             try requireStatus(try await api(app, .DELETE, "groups/\(security.groupID)/members/\(approver.id)",
                 token: tenant.admin.token, organizationID: orgID), .noContent)

@@ -42,14 +42,21 @@ To run the project and start the server, use the following command:
 swift run
 ```
 
-To execute tests, use the following command:
+Run the tests against a disposable database that has run `Database/bootstrap.sql`,
+such as a fresh Compose `db`. `.env.testing` supplies the Compose role credentials:
 ```bash
 swift test
 ```
 
-For Docker, run `docker compose up -d app` after building the image. Compose
-passes OIDC settings from `.env` or your shell to the API server. The
-`migrate`, `prune-revoked-tokens`, `platform-admin`, and `approval-override`
+For a fresh local Docker database, run `docker compose run --rm migrate` and
+then `docker compose up -d app`. Compose uses the owner role for `migrate`
+and `revert` and the runtime role for `app`. If you have an earlier disposable
+Compose database, `docker compose down -v` removes its data and lets
+PostgreSQL run the bootstrap on the next start.
+
+Compose passes OIDC settings from `.env` or your shell to the API server. The
+`migrate`, `prune-revoked-tokens`, `platform-admin`, `approval-override`, and
+`audit-verify`
 commands require database settings and can run without OIDC configuration or
 provider access. After changing `.env`, run `docker compose up -d app` again
 to recreate the container with the new settings.
@@ -81,6 +88,47 @@ other clients, and overlapping instances during a rollout.
 Point the load balancer's readiness check at `GET /health`. It returns
 `{"status":"ok"}` after a successful database probe when signing keys are loaded,
 or a generic 503 problem when either dependency is unavailable.
+
+### Database roles and audit trail
+
+On a fresh deployment, run `psql -X -f Database/bootstrap.sql` as a database
+administrator connected to the target database. Migrations require this step
+because it creates the `audit` schema. Provision separate credentials
+for `open_erp_owner` and `open_erp_runtime` through your deployment's secret
+management. Use the owner credentials for migrations and reserve them for
+schema administration. Use the runtime credentials for the API. Production
+serving rejects superuser and audit owner sessions.
+
+After the first migration, run the following as the owner to remove the
+runtime role's default access to Fluent's migration history. Repeat if the
+migration history table is recreated.
+
+```sql
+REVOKE ALL ON TABLE public._fluent_migrations FROM open_erp_runtime;
+```
+
+Then run `swift run open-erp audit-verify` to check trigger coverage and unsafe
+grants. It reports the runtime role's migration history access until that revoke runs. Tenant roles with `audit_event:read` can read recorded values
+across all audited tables in their organization. Both organization role
+templates include this permission. Platform administrators can use
+`GET /platform/audit-events` to read global events.
+
+The API takes audit IP addresses from the socket by default. Set
+`TRUSTED_PROXY_COUNT` to the number of trusted forwarding hops if those
+proxies append to `X-Forwarded-For`. The API counts from the right and falls
+back to the socket address if the selected hop is missing or invalid.
+
+The `platform-admin` command requires `--operator` for both grants and revocations:
+
+```bash
+swift run open-erp platform-admin admin@example.com Ada Lovelace 'auth0|123' --operator 'Database Operations'
+```
+
+If you deploy with RDS Proxy, measure
+`DatabaseConnectionsCurrentlySessionPinned` under representative write load
+before go-live. Audit attribution uses a transaction-local setting, and
+PostgreSQL session settings can affect proxy connection reuse.
+[Amazon RDS Proxy pinning documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html)
 
 ## API documentation
 

@@ -40,6 +40,7 @@ struct ApprovalOverrideCommand: AsyncCommand {
             reason: reason,
             operatorName: operatorName,
             actorID: nil,
+            context: AuditContext(actorType: .operator, actorName: operatorName),
             on: db
         )
         context.application.logger.notice(

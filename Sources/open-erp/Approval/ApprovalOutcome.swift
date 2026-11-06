@@ -41,9 +41,10 @@ struct NewDecision: Sendable {
     var qualifyingGroupIDs: [UUID]
     var comment: String?
 
-    func insert(requestID: UUID, on db: any Database) async throws {
+    func insert(for request: ApprovalRequest, on db: any Database) async throws {
         try await ApprovalDecision(
-            requestID: requestID,
+            organizationID: request.$organization.id,
+            requestID: try request.requireID(),
             trackID: trackID,
             stage: stage,
             kind: kind.rawValue,

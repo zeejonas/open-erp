@@ -12,12 +12,14 @@ struct CreateOrganizationUser: AsyncMigration {
             .field("deleted_by", .uuid, .references("users", "id"))
             .field("created_at", .datetime)
             .field("deleted_at", .datetime)
+            .unique(on: "organization_id", "id")
             .create()
         try await database.createActiveUniqueIndex(
             "organization_users_active_member",
             on: "organization_users",
             columns: "organization_id", "user_id"
         )
+        try await database.createChangeTrigger(on: "organization_users")
     }
 
     func revert(on database: any Database) async throws {

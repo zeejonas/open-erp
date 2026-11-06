@@ -13,12 +13,13 @@ struct PruneRevokedTokensCommand: AsyncCommand {
     }
 
     static func prune(on db: any Database, now: Date = Date()) async throws -> Int {
-        guard let sql = db as? any SQLDatabase else { throw Abort(.internalServerError) }
-        // Return a constant per deleted row, never fingerprints.
-        return try await sql.delete(from: RevokedAccessToken.schema)
-            .where("expires_at", .lessThanOrEqual, SQLBind(now))
-            .returning(SQLLiteral.numeric("1"))
-            .all()
-            .count
+        try await db.auditedTransaction(AuditContext(actorType: .system, actorName: "prune-revoked-tokens")) { database in
+            // Return a constant per deleted row, never fingerprints.
+            try await database.requireSQL().delete(from: RevokedAccessToken.schema)
+                .where("expires_at", .lessThanOrEqual, SQLBind(now))
+                .returning(SQLLiteral.numeric("1"))
+                .all()
+                .count
+        }
     }
 }

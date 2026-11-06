@@ -13,11 +13,12 @@ struct CreateOrganizationRestoration: AsyncMigration {
             .field("reason", .string, .required)
             .field("created_at", .datetime, .required)
             .create()
-        try await database.createAuditTrigger(on: OrganizationRestoration.schema)
+        try await database.createAppendOnlyTrigger(on: OrganizationRestoration.schema)
+        try await database.createChangeTrigger(on: OrganizationRestoration.schema)
     }
 
     func revert(on database: any Database) async throws {
         try await database.schema(OrganizationRestoration.schema).delete()
-        try await database.dropAuditTriggerFunction(on: OrganizationRestoration.schema)
+        try await database.dropAppendOnlyTriggerFunction(on: OrganizationRestoration.schema)
     }
 }

@@ -109,7 +109,7 @@ struct InvitationController: RouteCollection {
         }
 
         return try await conflictOnDuplicate("User is already a member of this organization") {
-            try await req.db.transaction { db in
+            try await req.db.auditedTransaction(req.auditContext(verifiedSubject: token.subjectID)) { db in
                 let organization = try await lockOrganization(invitation.$organization.id, on: db)
                 // Definitive lookup follows the organization lock, after any userinfo delay.
                 guard let current = try await OrganizationInvitation.pending(on: db)
@@ -138,6 +138,8 @@ struct InvitationController: RouteCollection {
                 }
 
                 let user = try await resolveUser(subject: token.subjectID, invitation: current, on: db)
+                // Only binding or creating the user is attributed to the bare identity.
+                try await db.setAuditContext(req.auditContext(user: user))
                 let userID = try user.requireID()
 
                 let membership = OrganizationUser(organizationID: organizationID, userID: userID, createdByID: userID)
@@ -145,6 +147,7 @@ struct InvitationController: RouteCollection {
 
                 if let groupID = current.$group.id {
                     try await GroupMember(
+                        organizationID: organizationID,
                         groupID: groupID,
                         organizationUserID: try membership.requireID(),
                         createdByID: userID
@@ -171,7 +174,7 @@ private func resolveUser(
     invitation: OrganizationInvitation,
     on db: any Database
 ) async throws -> User {
-    let bySubject = try await User.query(on: db).filter(\.$authSubject == subject).first()
+    let bySubject = try await User.bound(to: subject, on: db)
     let byEmail = try await User.find(email: invitation.email, on: db)
 
     if let byEmail, let bound = byEmail.authSubject, bound != subject {

@@ -19,11 +19,13 @@ struct CreateCompany: AsyncMigration {
             .field("updated_at", .datetime, .required)
             .field("deleted_at", .datetime)
             .unique(on: "organization_id", "code")
+            .unique(on: "organization_id", "id")
             .create()
         // `(organization_id, code)` is already indexed by the unique constraint.
         for column in ["name", "updated_at"] {
             try await database.createIndex("companies_organization_id_\(column)_idx", on: "companies", columns: "organization_id", column)
         }
+        try await database.createChangeTrigger(on: "companies")
     }
 
     func revert(on database: any Database) async throws {

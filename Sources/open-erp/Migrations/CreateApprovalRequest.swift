@@ -15,15 +15,17 @@ struct CreateApprovalRequest: AsyncMigration {
             .field("requested_by", .uuid, .required, .references("users", "id"))
             .field("created_at", .datetime)
             .field("updated_at", .datetime)
+            .unique(on: "organization_id", "id")
             .create()
-        try await database.createAuditTrigger(
+        try await database.createAppendOnlyTrigger(
             on: "approval_requests",
             protected: ["organization_id", "permission", "target_id", "change", "requested_by", "created_at"]
         )
+        try await database.createChangeTrigger(on: "approval_requests")
     }
 
     func revert(on database: any Database) async throws {
         try await database.schema("approval_requests").delete()
-        try await database.dropAuditTriggerFunction(on: "approval_requests")
+        try await database.dropAppendOnlyTriggerFunction(on: "approval_requests")
     }
 }

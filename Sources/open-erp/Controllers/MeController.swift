@@ -66,7 +66,9 @@ struct MeController: RouteCollection {
         }
         if changed {
             user.$updatedBy.id = try user.requireID()
-            try await user.update(on: req.db)
+            try await req.db.auditedTransaction(req.auditContext()) { db in
+                try await user.update(on: db)
+            }
         }
         return user.toGetDTO()
     }

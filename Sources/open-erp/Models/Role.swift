@@ -100,7 +100,7 @@ final class Role: Model, @unchecked Sendable {
         }
         let held = Set(current.map(\.permission))
         for permission in permissions where !held.contains(permission.rawValue) {
-            try await RolePermission(roleID: roleID, permission: permission.rawValue, createdByID: actorID).save(on: db)
+            try await RolePermission(organizationID: $organization.id, roleID: roleID, permission: permission.rawValue, createdByID: actorID).save(on: db)
         }
         try await $permissionGrants.load(on: db)
     }
@@ -121,6 +121,9 @@ final class RolePermission: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "role_id")
     var role: Role
 
@@ -135,7 +138,8 @@ final class RolePermission: Model, @unchecked Sendable {
 
     init() {}
 
-    init(roleID: UUID, permission: String, createdByID: UUID? = nil) {
+    init(organizationID: UUID, roleID: UUID, permission: String, createdByID: UUID? = nil) {
+        self.$organization.id = organizationID
         self.$role.id = roleID
         self.permission = permission
         self.$createdBy.id = createdByID

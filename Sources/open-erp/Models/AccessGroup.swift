@@ -112,6 +112,7 @@ final class AccessGroup: Model, @unchecked Sendable {
                     throw Abort(.internalServerError, reason: "Role template \(roleKey) was not copied")
                 }
                 try await GroupRole(
+                    organizationID: organizationID,
                     groupID: try group.requireID(),
                     roleID: try role.requireID(),
                     createdByID: createdByID
@@ -129,6 +130,9 @@ final class GroupMember: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "group_id")
     var group: AccessGroup
 
@@ -143,7 +147,8 @@ final class GroupMember: Model, @unchecked Sendable {
 
     init() {}
 
-    init(groupID: UUID, organizationUserID: UUID, createdByID: UUID? = nil) {
+    init(organizationID: UUID, groupID: UUID, organizationUserID: UUID, createdByID: UUID? = nil) {
+        self.$organization.id = organizationID
         self.$group.id = groupID
         self.$organizationUser.id = organizationUserID
         self.$createdBy.id = createdByID
@@ -166,6 +171,9 @@ final class GroupRole: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "group_id")
     var group: AccessGroup
 
@@ -180,7 +188,8 @@ final class GroupRole: Model, @unchecked Sendable {
 
     init() {}
 
-    init(groupID: UUID, roleID: UUID, createdByID: UUID? = nil) {
+    init(organizationID: UUID, groupID: UUID, roleID: UUID, createdByID: UUID? = nil) {
+        self.$organization.id = organizationID
         self.$group.id = groupID
         self.$role.id = roleID
         self.$createdBy.id = createdByID
@@ -203,6 +212,9 @@ final class GroupCompany: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "group_id")
     var group: AccessGroup
 
@@ -217,7 +229,8 @@ final class GroupCompany: Model, @unchecked Sendable {
 
     init() {}
 
-    init(groupID: UUID, companyID: UUID, createdByID: UUID? = nil) {
+    init(organizationID: UUID, groupID: UUID, companyID: UUID, createdByID: UUID? = nil) {
+        self.$organization.id = organizationID
         self.$group.id = groupID
         self.$company.id = companyID
         self.$createdBy.id = createdByID

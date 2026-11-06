@@ -17,6 +17,7 @@ struct CreateOrganization: AsyncMigration {
             .field("deleted_at", .datetime)
             .unique(on: "code")
             .create()
+        try await database.createChangeTrigger(on: "organizations")
     }
 
     func revert(on database: any Database) async throws {

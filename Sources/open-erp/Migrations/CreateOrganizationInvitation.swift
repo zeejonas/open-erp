@@ -20,9 +20,11 @@ struct CreateOrganizationInvitation: AsyncMigration {
             .field("deleted_by", .uuid, .references("users", "id"))
             .field("created_at", .datetime)
             .field("deleted_at", .datetime)
-            .field("group_id", .uuid, .references("groups", "id"))
-            .field("approval_request_id", .uuid, .references("approval_requests", "id"))
+            .field("group_id", .uuid)
+            .field("approval_request_id", .uuid)
             .unique(on: "token_hash")
+            .tenantForeignKey("group_id", references: "groups")
+            .tenantForeignKey("approval_request_id", references: "approval_requests")
             .create()
         guard let sql = database as? any SQLDatabase else { throw Abort(.internalServerError) }
         try await sql.raw("""
@@ -30,6 +32,7 @@ struct CreateOrganizationInvitation: AsyncMigration {
             ON organization_invitations (organization_id)
             WHERE deleted_at IS NULL AND is_onboarding
             """).run()
+        try await database.createChangeTrigger(on: "organization_invitations", redact: ["token_hash"])
     }
 
     func revert(on database: any Database) async throws {

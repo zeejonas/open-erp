@@ -100,6 +100,10 @@ extension OpenERPTests {
             try await restore("invalid", token: platformToken, body: reason, status: .notFound)
             try await restore(UUID().uuidString, token: platformToken, body: reason, status: .notFound)
             try await restore(id.uuidString, token: platformToken, body: reason, status: .ok)
+            let restoreEvent = try #require(try await AuditEvent.query(on: app.db)
+                .filter(\.$recordID == id).filter(\.$operation == .restore).first())
+            #expect(restoreEvent.actorType == .platformAdmin)
+            #expect(restoreEvent.actorID == platform.id)
             try await restore(id.uuidString, token: platformToken, body: reason, status: .conflict)
 
             try await authorizedGet(app, "me/access", token: memberToken, organizationID: id) { res async throws in

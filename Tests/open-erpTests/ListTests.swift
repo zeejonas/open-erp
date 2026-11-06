@@ -325,6 +325,7 @@ extension OpenERPTests {
                     .filter(\.$user.$id == userID)
                     .first()
                 try await GroupMember(
+                    organizationID: orgID,
                     groupID: clerksID,
                     organizationUserID: try membership!.requireID(),
                     createdByID: adminID
@@ -361,6 +362,7 @@ extension OpenERPTests {
                 .filter(\.$user.$id == beaID)
                 .first()
             try await GroupMember(
+                organizationID: orgID,
                 groupID: tempsID,
                 organizationUserID: try beaMembership!.requireID(),
                 createdByID: adminID
@@ -399,8 +401,8 @@ extension OpenERPTests {
             let roleID = try role.requireID()
             let company = try await saveCompany(on: app.db, organizationID: orgAID, code: "EAST", name: "Acme East")
             let companyID = try company.requireID()
-            try await GroupRole(groupID: clerksID, roleID: roleID, createdByID: actorID).save(on: app.db)
-            try await GroupCompany(groupID: clerksID, companyID: companyID, createdByID: actorID).save(on: app.db)
+            try await GroupRole(organizationID: orgAID, groupID: clerksID, roleID: roleID, createdByID: actorID).save(on: app.db)
+            try await GroupCompany(organizationID: orgAID, groupID: clerksID, companyID: companyID, createdByID: actorID).save(on: app.db)
 
             let byName = try await listGroups(app, token: token, organizationID: orgAID, query: "name=viewers")
             #expect(byName.items.map(\.name) == ["Viewers"])
