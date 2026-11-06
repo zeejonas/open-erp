@@ -2,6 +2,7 @@ import Fluent
 import FluentSQL
 import Foundation
 import Vapor
+import VaporToOpenAPI
 
 /// `page` and `per` for every list. Out-of-range values fail validation instead of being clamped.
 struct ListPage: Decodable, Validatable {
@@ -16,6 +17,83 @@ struct ListPage: Decodable, Validatable {
     var request: PageRequest {
         PageRequest(page: page ?? 1, per: per ?? 25)
     }
+}
+
+struct ListSort: Decodable, Validatable {
+    var sort: String?
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("sort", as: String.self, is: !.empty, required: false)
+    }
+}
+
+/// What one list endpoint can sort by. Parsing, errors, and published documentation all derive from this.
+struct ListSortOrder<Row: Model>: Sendable {
+    typealias Field = @Sendable (QueryBuilder<Row>, DatabaseQuery.Sort.Direction) -> Void
+    typealias TieBreak = @Sendable (QueryBuilder<Row>) -> Void
+
+    private let fields: [String: Field]
+    private let defaultSort: String
+    private let tieBreak: TieBreak
+
+    /// `default` uses the same grammar as the request parameter. An invalid default stops the app at boot.
+    init(
+        fields: [String: Field],
+        default defaultSort: String,
+        tieBreak: @escaping TieBreak = { $0.sort(FieldKey.id, .ascending) }
+    ) {
+        self.fields = fields
+        self.defaultSort = defaultSort
+        self.tieBreak = tieBreak
+        precondition((try? parse(defaultSort)) != nil, "Invalid default sort \(defaultSort)")
+    }
+
+    var fieldNames: [String] { fields.keys.sorted() }
+
+    /// Matches the grammar, except that a pattern cannot require distinct fields.
+    var pattern: String {
+        let field = "-?(\(fieldNames.joined(separator: "|")))"
+        return "^\(field)(,\(field))*$"
+    }
+
+    var openAPIParameter: OpenAPIParameters {
+        ["sort": .string(pattern: pattern)]
+    }
+
+    var documentation: String {
+        "Optional sort is a comma-separated list of distinct fields (\(fieldNames.joined(separator: ", "))), highest priority first. Fields sort ascending unless prefixed with - for descending. Defaults to \(defaultSort)."
+    }
+
+    fileprivate func parse(_ sort: String?) throws -> ListSortTerms<Row> {
+        var seen: Set<String> = []
+        var terms: [ListSortTerms<Row>.Term] = []
+        for term in (sort ?? defaultSort).split(separator: ",", omittingEmptySubsequences: false) {
+            let descending = term.hasPrefix("-")
+            let name = String(descending ? term.dropFirst() : term)
+            guard !name.isEmpty else {
+                throw Abort(.badRequest, reason: "Empty field in sort")
+            }
+            guard let field = fields[name] else {
+                throw Abort(.badRequest, reason: "Invalid sort field \(name). Allowed: \(fieldNames.joined(separator: ", "))")
+            }
+            guard seen.insert(name).inserted else {
+                throw Abort(.badRequest, reason: "Repeated sort field \(name)")
+            }
+            terms.append(.init(field: field, direction: descending ? .descending : .ascending))
+        }
+        return ListSortTerms(terms: terms, tieBreak: tieBreak)
+    }
+}
+
+/// A validated sort, ready to apply to a query.
+struct ListSortTerms<Row: Model> {
+    fileprivate struct Term {
+        let field: ListSortOrder<Row>.Field
+        let direction: DatabaseQuery.Sort.Direction
+    }
+
+    fileprivate let terms: [Term]
+    fileprivate let tieBreak: ListSortOrder<Row>.TieBreak
 }
 
 protocol ListFilters: Decodable, Validatable {
@@ -144,7 +222,24 @@ struct InvitationListFilters: ListFilters {
 extension Request {
     /// Rejects undeclared or repeated query keys, then validates and decodes paging and filters.
     func listParameters<Filters: ListFilters>(_ filters: Filters.Type) throws -> (Filters, PageRequest) {
-        let allowed = filters.keys.union(["page", "per"])
+        try listParameters(filters, additionalKeys: [])
+    }
+
+    /// Also validates and parses `sort` against the endpoint's declared order.
+    func listParameters<Filters: ListFilters, Row: Model>(
+        _ filters: Filters.Type,
+        sort order: ListSortOrder<Row>
+    ) throws -> (Filters, PageRequest, ListSortTerms<Row>) {
+        let (filters, page) = try listParameters(filters, additionalKeys: ["sort"])
+        try ListSort.validate(query: self)
+        return (filters, page, try order.parse(query.decode(ListSort.self).sort))
+    }
+
+    private func listParameters<Filters: ListFilters>(
+        _ filters: Filters.Type,
+        additionalKeys: Set<String>
+    ) throws -> (Filters, PageRequest) {
+        let allowed = filters.keys.union(["page", "per"]).union(additionalKeys)
         var seen: Set<String> = []
         for name in try queryParameterNames() {
             guard allowed.contains(name) else {
@@ -174,6 +269,16 @@ extension Request {
 }
 
 extension QueryBuilder {
+    /// Applies the terms in precedence order, then the tie-break.
+    @discardableResult
+    func sorted(by order: ListSortTerms<Model>) -> Self {
+        for term in order.terms {
+            term.field(self, term.direction)
+        }
+        order.tieBreak(self)
+        return self
+    }
+
     /// Newest first by the given timestamp, then `id`, so a tie still has one order.
     @discardableResult
     func newestFirst<Field>(

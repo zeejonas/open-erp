@@ -13,6 +13,15 @@ extension Database {
         try await index.run()
     }
 
+    /// An index over all rows, for reads that filter and sort within the leading columns.
+    func createIndex(_ name: String, on table: String, columns: String...) async throws {
+        let index = try sql().create(index: name).on(table)
+        for column in columns {
+            index.column(column)
+        }
+        try await index.run()
+    }
+
     /// A row trigger that keeps approval evidence append-only.
     /// With no protected columns, every update and delete is rejected.
     /// Otherwise a delete is rejected, and an update is rejected only when one of those columns changes.

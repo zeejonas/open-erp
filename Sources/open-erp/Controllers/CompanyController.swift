@@ -3,14 +3,23 @@ import Vapor
 import VaporToOpenAPI
 
 struct CompanyController: RouteCollection {
+    static let sort = ListSortOrder<Company>(
+        fields: [
+            "code": { $0.sort(\.$code, $1) },
+            "name": { $0.sort(\.$name, $1) },
+            "updatedAt": { $0.sort(\.$updatedAt, $1) },
+        ],
+        default: "-updatedAt"
+    )
+
     func boot(routes: any RoutesBuilder) throws {
         let companies = routes.grouped(AuthMiddleware(), OrganizationMiddleware()).grouped("companies")
 
         companies.get(use: self.index)
             .openAPI(
                 summary: "List companies",
-                description: "Requires company:read. Newest updatedAt first, then id ascending. page defaults to 1; per defaults to 25 (maximum 100). Unknown or repeated query parameters return 400.",
-                query: [.type(ListPage.self), .type(CompanyListFilters.self)],
+                description: "Requires company:read. \(Self.sort.documentation) Ties use id ascending. page defaults to 1; per defaults to 25 (maximum 100). Invalid sorts and unknown or repeated query parameters return 400.",
+                query: [.type(ListPage.self), .type(CompanyListFilters.self), Self.sort.openAPIParameter],
                 headers: .type(OrganizationHeaders.self),
                 response: .type(Page<GetCompanyDTO>.self),
                 auth: .bearer()
@@ -65,11 +74,11 @@ struct CompanyController: RouteCollection {
     @Sendable
     func index(req: Request) async throws -> Page<GetCompanyDTO> {
         try req.require(.companyRead)
-        let (filters, page) = try req.listParameters(CompanyListFilters.self)
+        let (filters, page, order) = try req.listParameters(CompanyListFilters.self, sort: Self.sort)
         return try await Company.query(on: req.db, organizationID: req.organizationID)
             .filter(\.$code, contains: filters.code)
             .filter(\.$name, contains: filters.name)
-            .newestFirst(\.$updatedAt)
+            .sorted(by: order)
             .paginate(page)
             .map { $0.toGetDTO() }
     }
