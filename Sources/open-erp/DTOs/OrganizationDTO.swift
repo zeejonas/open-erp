@@ -56,7 +56,7 @@ struct CreateCompanyDTO: Content {
 
 extension CreateCompanyDTO: Validatable {
     static func validations(_ validations: inout Validations) {
-        validations.add("code", as: String.self, is: !.empty && .count(4...10) && .alphanumeric, customFailureDescription: "code must be 4-10 characters and alphanumeric")
+        validations.add("code", as: String.self, is: !.empty && .count(2...10) && .alphanumeric, customFailureDescription: "code must be 2-10 characters and alphanumeric")
         validations.add("name", as: String.self, is: !.empty && .count(3...255), customFailureDescription: "Name must be 3-255 characters")
     }
 }
