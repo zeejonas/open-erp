@@ -89,7 +89,7 @@ extension OpenERPTests {
         }
     }
 
-    @Test("Company lists filter, keep a renamed company first, and count only the caller's organization")
+    @Test("Company lists filter and sort across pages within the caller's organization")
     func companyLists() async throws {
         try await withApp { app in
             let orgA = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
@@ -133,11 +133,107 @@ extension OpenERPTests {
             #expect(ordered.items.map(\.id).contains(globexID))
 
             for number in 1...5 {
-                _ = try await saveCompany(on: app.db, organizationID: orgBID, code: "B\(number)", name: "Org B \(number)")
+                _ = try await saveCompany(on: app.db, organizationID: orgBID, code: "B\(number)", name: "Acme Org B \(number)")
             }
             let scoped = try await listCompanies(app, token: token, organizationID: orgAID)
             #expect(scoped.metadata.total == 4)
             #expect(scoped.items.allSatisfy { $0.organizationId == orgAID })
+
+            _ = try await saveCompany(on: app.db, organizationID: orgAID, code: "ZACME", name: "Acme Renamed")
+            _ = try await saveCompany(on: app.db, organizationID: orgAID, code: "ZZZ", name: "Acme Z")
+            let sorted = try await listCompanies(app, token: token, organizationID: orgAID, query: "name=acme&sort=name,-code&per=1")
+            let next = try await listCompanies(app, token: token, organizationID: orgAID, query: "name=acme&sort=name,-code&per=1&page=2")
+            #expect(sorted.metadata.total == 3)
+            #expect(sorted.items.map(\.code) == ["ZACME"])
+            #expect(next.items.map(\.code) == ["EAST"])
+
+            let oldest = try await listCompanies(app, token: token, organizationID: orgAID, query: "sort=updatedAt&per=1")
+            #expect(oldest.items.map(\.id) == [globexID])
+
+            _ = try await createMember(
+                on: app.db, organizationID: orgAID, email: "denied@example.com", subject: "denied", permissions: []
+            )
+            let denied = try await signAccessToken(on: app, subject: "denied")
+            try await authorizedGet(app, "companies", query: "sort=name", token: denied, organizationID: orgAID) { res in
+                #expect(res.status == .forbidden)
+            }
+        }
+    }
+
+    @Test("Company sort orders text by dictionary, honors each field and direction, and rejects bad terms")
+    func companySortContract() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
+            let orgID = try org.requireID()
+            _ = try await createMember(
+                on: app.db, organizationID: orgID, email: "ada@example.com", subject: "ada", permissions: Permission.allCases
+            )
+            let token = try await signAccessToken(on: app, subject: "ada")
+            for (code, name) in [("c3", "Zeta"), ("C1", "apple"), ("C5", "Éclair"), ("c2", "Banana"), ("C4", "eagle")] {
+                try await saveCompany(on: app.db, organizationID: orgID, code: code, name: name)
+            }
+            func names(_ query: String?) async throws -> [String] {
+                try await listCompanies(app, token: token, organizationID: orgID, query: query).items.map(\.name)
+            }
+            func codes(_ query: String) async throws -> [String] {
+                try await listCompanies(app, token: token, organizationID: orgID, query: query).items.map(\.code)
+            }
+
+            let dictionary = ["apple", "Banana", "eagle", "Éclair", "Zeta"]
+            #expect(try await names("sort=name") == dictionary)
+            #expect(try await names("sort=-name") == dictionary.reversed())
+            #expect(try await codes("sort=code") == ["C1", "c2", "c3", "C4", "C5"])
+            #expect(try await codes("sort=-code") == ["C5", "C4", "c3", "c2", "C1"])
+
+            let created = ["Zeta", "apple", "Éclair", "Banana", "eagle"]
+            #expect(try await names("sort=updatedAt") == created)
+            #expect(try await names("sort=-updatedAt") == created.reversed())
+            #expect(try await names(nil) == created.reversed())
+
+            let allowed = "code, name, updatedAt"
+            let rejected: [(String, [String])] = [
+                ("sort=organizationId", ["sort", "organizationId", allowed]),
+                ("sort=Name", ["sort", "Name", allowed]),
+                ("sort=name,-name", ["sort", "name"]),
+                ("sort=", ["sort"]),
+                ("sort=name,", ["sort"]),
+                ("sort=-", ["sort"]),
+                ("sort", ["sort"]),
+                ("sort=name&sort=code", ["sort"]),
+            ]
+            for (query, expected) in rejected {
+                try await authorizedGet(app, "companies", query: query, token: token, organizationID: orgID) { res in
+                    for term in expected {
+                        try expectBadRequest(res, naming: term)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test("Company sort breaks ties by id across pages")
+    func companySortTieBreak() async throws {
+        try await withApp { app in
+            let org = try await createOrganization(on: app.db, code: "ORGA", name: "Org A")
+            let orgID = try org.requireID()
+            _ = try await createMember(
+                on: app.db, organizationID: orgID, email: "ada@example.com", subject: "ada", permissions: Permission.allCases
+            )
+            let token = try await signAccessToken(on: app, subject: "ada")
+            var ids: [UUID] = []
+            for number in 1...8 {
+                let company = try await saveCompany(on: app.db, organizationID: orgID, code: "T\(number)", name: "Tied")
+                ids.append(try company.requireID())
+            }
+
+            var paged: [UUID?] = []
+            for number in 1...8 {
+                let page = try await listCompanies(
+                    app, token: token, organizationID: orgID, query: "sort=name&per=1&page=\(number)"
+                )
+                paged += page.items.map(\.id)
+            }
+            #expect(paged == ids.sorted { $0.uuidString < $1.uuidString })
         }
     }
 

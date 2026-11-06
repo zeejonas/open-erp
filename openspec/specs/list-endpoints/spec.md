@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Paging, strict query parameters, fixed order, and filters for every collection endpoint.
+Paging, strict query parameters, stable ordering, sorting, and filters for collection endpoints.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ Every endpoint that returns a collection SHALL respond with `{ "items": [...], "
 - **THEN** the system responds `403 Forbidden`
 
 ### Requirement: Strict list parameters
-Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1), `per` (an integer from 1 to 100, default 25), and only the filters it declares. The system SHALL respond `400 Bad Request` with a `bad_request` problem whose `detail` names the parameter when a value is out of range, not an integer, an empty filter, an unknown enum value, an undeclared parameter, or a repeated parameter. It SHALL NOT clamp, ignore, or otherwise reinterpret a parameter.
+Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1), `per` (an integer from 1 to 100, default 25), and only the filters and sort parameter it declares. The system SHALL respond `400 Bad Request` with a `bad_request` problem whose `detail` names the parameter when a value is out of range, not an integer, an empty filter, an unknown enum value, an undeclared parameter, or a repeated parameter. It SHALL NOT clamp, ignore, or otherwise reinterpret a parameter.
 
 #### Scenario: Oversized page size
 - **WHEN** a member calls `GET /roles?per=101`
@@ -56,8 +56,8 @@ Every list endpoint SHALL accept `page` (an integer of 1 or greater, default 1),
 - **WHEN** a member calls `GET /roles?level=global`
 - **THEN** the system responds `400` and names `level`
 
-### Requirement: Fixed list order
-Every list backed by timestamped rows SHALL be ordered newest first by the listed model's `updatedAt`, or by `createdAt` when the model has no `updatedAt`, and then by `id`. No list endpoint SHALL accept a sort parameter.
+### Requirement: Default list order
+Unless an endpoint declares a sort parameter and the request supplies it, every list backed by timestamped rows SHALL be ordered newest first by the listed model's `updatedAt`, or by `createdAt` when the model has no `updatedAt`, and then by `id` ascending. An endpoint that does not declare a sort parameter SHALL reject one as an undeclared parameter.
 
 | Endpoint | Order |
 |---|---|
@@ -81,9 +81,63 @@ Every list backed by timestamped rows SHALL be ordered newest first by the liste
 - **WHEN** a member reads every page of `GET /roles?per=1` while no role changes
 - **THEN** each role appears exactly once
 
-#### Scenario: Sort parameter rejected
-- **WHEN** a member calls `GET /companies?sort=name`
+#### Scenario: Undeclared sort parameter rejected
+- **WHEN** a member calls `GET /roles?sort=name`
 - **THEN** the system responds `400` and names `sort`
+
+### Requirement: Sortable list contract
+An endpoint MAY declare a `sort` parameter by listing its sort fields, its default order, and its tie-break. A field SHALL be one the endpoint already returns to the caller. The value of `sort` SHALL be a comma-separated list of distinct declared fields in order of precedence, and a field SHALL sort ascending unless prefixed with `-` for descending. Field names SHALL match exactly, including case. The sort SHALL apply to the filtered, authorized result set before pagination, and the tie-break SHALL be applied last, so that the same unchanged rows always have one order. An empty value, empty term, undeclared field, or repeated field SHALL respond `400 Bad Request` with a `bad_request` problem whose `detail` names `sort`; for an undeclared or repeated field it SHALL also name the rejected term, and for an undeclared field it SHALL also name the allowed fields.
+
+#### Scenario: Precedence and direction
+- **WHEN** a member calls a sortable endpoint with `sort=name,-code`
+- **THEN** rows are ordered by name ascending and, among equal names, by code descending
+
+#### Scenario: Tie-break across pages
+- **WHEN** rows have equal values in every requested field and a member reads every page with `per=1`
+- **THEN** each row appears exactly once, in tie-break order
+
+#### Scenario: Undeclared field
+- **WHEN** a member calls `GET /companies?sort=organizationId`
+- **THEN** the system responds `400`, and `detail` names `sort`, `organizationId`, and the allowed fields
+
+#### Scenario: Field name differs in case
+- **WHEN** a member calls `GET /companies?sort=Name`
+- **THEN** the system responds `400`, and `detail` names `sort`, `Name`, and the allowed fields
+
+#### Scenario: Repeated field
+- **WHEN** a member calls `GET /companies?sort=name,-name`
+- **THEN** the system responds `400`, and `detail` names `sort` and `name`
+
+#### Scenario: Empty value or term
+- **WHEN** a member calls `GET /companies?sort=` or `GET /companies?sort=name,`
+- **THEN** the system responds `400` and names `sort`
+
+#### Scenario: Repeated parameter
+- **WHEN** a member calls `GET /companies?sort=name&sort=code`
+- **THEN** the system responds `400` and names `sort`
+
+#### Scenario: Published fields match accepted fields
+- **WHEN** a client reads the published OpenAPI document for a sortable endpoint
+- **THEN** the `sort` parameter documents exactly the fields the endpoint accepts
+
+### Requirement: Company list sorting
+`GET /companies` SHALL declare the sort fields `code`, `name`, and `updatedAt`, with default order `-updatedAt` and tie-break `id` ascending. `code` and `name` SHALL sort by the ICU root collation, independent of the database's default locale. Company `createdAt` and `updatedAt` SHALL NOT be null.
+
+#### Scenario: Names sort in dictionary order
+- **WHEN** a member with `company:read` has companies named "Zeta", "apple", "Éclair", "Banana", and "eagle" and calls `GET /companies?sort=name`
+- **THEN** the order is "apple", "Banana", "eagle", "Éclair", "Zeta"
+
+#### Scenario: Descending timestamp
+- **WHEN** a member with `company:read` calls `GET /companies?sort=-updatedAt`
+- **THEN** the most recently updated company is listed first
+
+#### Scenario: Sort stays within the tenant
+- **WHEN** a member of organization A calls `GET /companies?sort=name` and organization B has a company whose name sorts first
+- **THEN** the response and its total contain only organization A's companies
+
+#### Scenario: Read permission still required when sorting
+- **WHEN** a member without `company:read` calls `GET /companies?sort=name`
+- **THEN** the system responds `403 Forbidden`
 
 ### Requirement: List filters
 Text filters SHALL match a case-insensitive substring, and `%`, `_`, and `\` in the value SHALL match literally. ID and enum filters SHALL match exactly. Filters SHALL combine with AND and SHALL apply within the caller's tenant scope. An ID from another organization SHALL match nothing rather than return an error. The filters for each endpoint SHALL be:
