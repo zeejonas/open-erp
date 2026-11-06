@@ -88,7 +88,7 @@ func createMember(
         )
         try await role.save(on: db)
         for permission in permissions {
-            try await RolePermission(roleID: try role.requireID(), permission: permission.rawValue).save(on: db)
+            try await RolePermission(organizationID: organizationID, roleID: try role.requireID(), permission: permission.rawValue).save(on: db)
         }
         let group = AccessGroup(
             organizationID: organizationID,
@@ -97,11 +97,13 @@ func createMember(
         )
         try await group.save(on: db)
         try await GroupRole(
+            organizationID: organizationID,
             groupID: try group.requireID(),
             roleID: try role.requireID(),
             createdByID: try user.requireID()
         ).save(on: db)
         try await GroupMember(
+            organizationID: organizationID,
             groupID: try group.requireID(),
             organizationUserID: try membership.requireID(),
             createdByID: try user.requireID()

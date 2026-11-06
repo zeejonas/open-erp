@@ -45,6 +45,43 @@ extension OpenERPTests {
         }
     }
 
+    @Test("Tenant foreign keys reject foreign parents and allow an empty optional parent")
+    func tenantForeignKeys() async throws {
+        try await withApp { app in
+            let first = try await createOrganization(on: app.db, code: "FIRST", name: "First").requireID()
+            let second = try await createOrganization(on: app.db, code: "SECOND", name: "Second").requireID()
+            let user = try await createUser(on: app.db, email: "tenant@example.com").requireID()
+            let group = AccessGroup(organizationID: first, name: "Group", createdByID: user)
+            try await group.save(on: app.db)
+            let groupID = try group.requireID()
+            let membership = OrganizationUser(organizationID: second, userID: user)
+            try await membership.save(on: app.db)
+            let membershipID = try membership.requireID()
+            let role = Role(organizationID: first, name: "Role", level: .organization)
+            try await role.save(on: app.db)
+            let roleID = try role.requireID()
+
+            try await expectForeignKeyViolation {
+                try await GroupMember(organizationID: first, groupID: groupID, organizationUserID: membershipID)
+                    .save(on: app.db)
+            }
+            try await expectForeignKeyViolation {
+                try await RolePermission(organizationID: second, roleID: roleID, permission: Permission.companyRead.rawValue)
+                    .save(on: app.db)
+            }
+            try await expectForeignKeyViolation {
+                _ = try await OrganizationInvitation.issue(
+                    organizationID: second, email: "invite@example.com", firstName: "A", lastName: "B",
+                    groupID: groupID, createdByID: nil, on: app.db)
+            }
+            let (invitation, _) = try await OrganizationInvitation.issue(
+                organizationID: second, email: "invite@example.com", firstName: "A", lastName: "B",
+                groupID: nil, createdByID: nil, on: app.db)
+            #expect(invitation.$group.id == nil)
+            #expect(invitation.$approvalRequest.id == nil)
+        }
+    }
+
     @Test("Duplicate active rows in each group table are rejected")
     func groupTablesRejectDuplicateActiveRows() async throws {
         try await withApp { app in
@@ -81,29 +118,29 @@ extension OpenERPTests {
             try await reused.save(on: app.db)
             let groupID = try reused.requireID()
 
-            let member = GroupMember(groupID: groupID, organizationUserID: membershipID, createdByID: userID)
+            let member = GroupMember(organizationID: orgAID, groupID: groupID, organizationUserID: membershipID, createdByID: userID)
             try await member.save(on: app.db)
             try await expectUniqueViolation {
-                try await GroupMember(groupID: groupID, organizationUserID: membershipID, createdByID: userID).save(on: app.db)
+                try await GroupMember(organizationID: orgAID, groupID: groupID, organizationUserID: membershipID, createdByID: userID).save(on: app.db)
             }
             try await member.softDelete(by: userID, \.$deletedBy, on: app.db)
-            try await GroupMember(groupID: groupID, organizationUserID: membershipID, createdByID: userID).save(on: app.db)
+            try await GroupMember(organizationID: orgAID, groupID: groupID, organizationUserID: membershipID, createdByID: userID).save(on: app.db)
 
-            let groupRole = GroupRole(groupID: groupID, roleID: roleID, createdByID: userID)
+            let groupRole = GroupRole(organizationID: orgAID, groupID: groupID, roleID: roleID, createdByID: userID)
             try await groupRole.save(on: app.db)
             try await expectUniqueViolation {
-                try await GroupRole(groupID: groupID, roleID: roleID, createdByID: userID).save(on: app.db)
+                try await GroupRole(organizationID: orgAID, groupID: groupID, roleID: roleID, createdByID: userID).save(on: app.db)
             }
             try await groupRole.softDelete(by: userID, \.$deletedBy, on: app.db)
-            try await GroupRole(groupID: groupID, roleID: roleID, createdByID: userID).save(on: app.db)
+            try await GroupRole(organizationID: orgAID, groupID: groupID, roleID: roleID, createdByID: userID).save(on: app.db)
 
-            let eligibility = GroupCompany(groupID: groupID, companyID: companyID, createdByID: userID)
+            let eligibility = GroupCompany(organizationID: orgAID, groupID: groupID, companyID: companyID, createdByID: userID)
             try await eligibility.save(on: app.db)
             try await expectUniqueViolation {
-                try await GroupCompany(groupID: groupID, companyID: companyID, createdByID: userID).save(on: app.db)
+                try await GroupCompany(organizationID: orgAID, groupID: groupID, companyID: companyID, createdByID: userID).save(on: app.db)
             }
             try await eligibility.softDelete(by: userID, \.$deletedBy, on: app.db)
-            try await GroupCompany(groupID: groupID, companyID: companyID, createdByID: userID).save(on: app.db)
+            try await GroupCompany(organizationID: orgAID, groupID: groupID, companyID: companyID, createdByID: userID).save(on: app.db)
         }
     }
 
@@ -197,20 +234,20 @@ extension OpenERPTests {
             try await reused.save(on: app.db)
             let reusedID = try reused.requireID()
 
-            let slot = ApprovalPolicySlot(policyID: reusedID, stage: 1, groupID: groupID, required: 1, createdByID: userID)
+            let slot = ApprovalPolicySlot(organizationID: organizationID, policyID: reusedID, stage: 1, groupID: groupID, required: 1, createdByID: userID)
             try await slot.save(on: app.db)
             try await expectUniqueViolation {
-                try await ApprovalPolicySlot(policyID: reusedID, stage: 1, groupID: groupID, required: 2, createdByID: userID)
+                try await ApprovalPolicySlot(organizationID: organizationID, policyID: reusedID, stage: 1, groupID: groupID, required: 2, createdByID: userID)
                     .save(on: app.db)
             }
             try await slot.softDelete(by: userID, \.$deletedBy, on: app.db)
-            try await ApprovalPolicySlot(policyID: reusedID, stage: 1, groupID: groupID, required: 1, createdByID: userID)
+            try await ApprovalPolicySlot(organizationID: organizationID, policyID: reusedID, stage: 1, groupID: groupID, required: 1, createdByID: userID)
                 .save(on: app.db)
 
-            try await ApprovalPolicyVersion(policyID: policyID, version: 1, definition: definition, createdByID: userID)
+            try await ApprovalPolicyVersion(organizationID: organizationID, policyID: policyID, version: 1, definition: definition, createdByID: userID)
                 .save(on: app.db)
             try await expectUniqueViolation {
-                try await ApprovalPolicyVersion(policyID: policyID, version: 1, definition: definition, createdByID: userID)
+                try await ApprovalPolicyVersion(organizationID: organizationID, policyID: policyID, version: 1, definition: definition, createdByID: userID)
                     .save(on: app.db)
             }
         }
@@ -243,6 +280,7 @@ extension OpenERPTests {
             )
             try await policy.save(on: app.db)
             let version = ApprovalPolicyVersion(
+                organizationID: organizationID,
                 policyID: try policy.requireID(),
                 version: 1,
                 definition: definition,
@@ -263,6 +301,7 @@ extension OpenERPTests {
             try await request.save(on: app.db)
             let requestID = try request.requireID()
             let decision = ApprovalDecision(
+                organizationID: organizationID,
                 requestID: requestID,
                 trackID: nil,
                 stage: nil,
@@ -310,6 +349,7 @@ extension OpenERPTests {
             }
 
             let track = ApprovalRequestTrack(
+                organizationID: organizationID,
                 requestID: requestID,
                 policyVersionID: versionID,
                 currentStage: 1,
@@ -357,5 +397,15 @@ private func expectUniqueViolation(_ body: () async throws -> Void) async throws
     } catch {
         let description = String(reflecting: error).lowercased()
         #expect(description.contains("unique") || description.contains("23505"))
+    }
+}
+
+func expectForeignKeyViolation(_ body: () async throws -> Void) async throws {
+    do {
+        try await body()
+        Issue.record("Expected the database to reject a parent from another tenant")
+    } catch {
+        let description = String(reflecting: error).lowercased()
+        #expect(description.contains("foreign key") || description.contains("23503"))
     }
 }

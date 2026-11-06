@@ -112,6 +112,9 @@ final class ApprovalPolicySlot: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "policy_id")
     var policy: ApprovalPolicy
 
@@ -132,7 +135,8 @@ final class ApprovalPolicySlot: Model, @unchecked Sendable {
 
     init() {}
 
-    init(policyID: UUID, stage: Int, groupID: UUID, required: Int, createdByID: UUID?) {
+    init(organizationID: UUID, policyID: UUID, stage: Int, groupID: UUID, required: Int, createdByID: UUID?) {
+        self.$organization.id = organizationID
         self.$policy.id = policyID
         self.stage = stage
         self.$group.id = groupID
@@ -146,6 +150,9 @@ final class ApprovalPolicyVersion: Model, @unchecked Sendable {
 
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
+
+    @Parent(key: "organization_id")
+    var organization: Organization
 
     @Parent(key: "policy_id")
     var policy: ApprovalPolicy
@@ -162,7 +169,8 @@ final class ApprovalPolicyVersion: Model, @unchecked Sendable {
 
     init() {}
 
-    init(policyID: UUID, version: Int, definition: ApprovalPolicyDefinition, createdByID: UUID?) {
+    init(organizationID: UUID, policyID: UUID, version: Int, definition: ApprovalPolicyDefinition, createdByID: UUID?) {
+        self.$organization.id = organizationID
         self.$policy.id = policyID
         self.version = version
         self.definition = definition
@@ -263,6 +271,9 @@ final class ApprovalRequestTrack: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "request_id")
     var request: ApprovalRequest
 
@@ -280,7 +291,8 @@ final class ApprovalRequestTrack: Model, @unchecked Sendable {
 
     init() {}
 
-    init(requestID: UUID, policyVersionID: UUID, currentStage: Int, status: String) {
+    init(organizationID: UUID, requestID: UUID, policyVersionID: UUID, currentStage: Int, status: String) {
+        self.$organization.id = organizationID
         self.$request.id = requestID
         self.$policyVersion.id = policyVersionID
         self.currentStage = currentStage
@@ -304,6 +316,9 @@ final class ApprovalDecision: Model, @unchecked Sendable {
 
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
+
+    @Parent(key: "organization_id")
+    var organization: Organization
 
     @Parent(key: "request_id")
     var request: ApprovalRequest
@@ -334,6 +349,7 @@ final class ApprovalDecision: Model, @unchecked Sendable {
     init() {}
 
     init(
+        organizationID: UUID,
         requestID: UUID,
         trackID: UUID?,
         stage: Int?,
@@ -343,6 +359,7 @@ final class ApprovalDecision: Model, @unchecked Sendable {
         qualifyingGroupIDs: [UUID],
         comment: String?
     ) {
+        self.$organization.id = organizationID
         self.$request.id = requestID
         self.$track.id = trackID
         self.stage = stage

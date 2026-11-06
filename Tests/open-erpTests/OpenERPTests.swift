@@ -20,9 +20,12 @@ struct OpenERPTests {
             let userID = try user.requireID()
             let token = try await signAccessToken(on: app, subject: "ada")
 
+            app.storage[TrustedProxyCount.self] = 1
             var createdCompanyID: UUID?
             try await app.testing().test(.POST, "companies", beforeRequest: { req in
                 authorize(&req, token: token, organizationID: orgID)
+                req.headers.replaceOrAdd(name: "X-Forwarded-For", value: "198.51.100.9, 203.0.113.7")
+                req.headers.replaceOrAdd(name: "X-Request-Id", value: "create-company")
                 try req.content.encode(CreateCompanyDTO(code: "COMPA", name: "Company A"))
             }, afterResponse: { res async throws in
                 #expect(res.status == .ok)
@@ -34,9 +37,15 @@ struct OpenERPTests {
             })
 
             let companyID = try #require(createdCompanyID)
+            let event = try #require(try await AuditEvent.query(on: app.db).filter(\.$recordID == companyID).first())
+            #expect(event.actorType == .user)
+            #expect(event.actorID == userID)
+            #expect(event.ipAddress == "203.0.113.7")
+            #expect(event.requestID == "create-company")
             let group = AccessGroup(organizationID: orgID, name: "Plant", createdByID: userID)
             try await group.save(on: app.db)
             try await GroupCompany(
+                organizationID: orgID,
                 groupID: try group.requireID(),
                 companyID: companyID,
                 createdByID: userID

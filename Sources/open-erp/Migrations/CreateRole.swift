@@ -16,8 +16,10 @@ struct CreateRole: AsyncMigration {
             .field("created_at", .datetime)
             .field("updated_at", .datetime)
             .field("deleted_at", .datetime)
+            .unique(on: "organization_id", "id")
             .create()
         try await database.createActiveUniqueIndex("roles_active_name", on: "roles", columns: "organization_id", "name")
+        try await database.createChangeTrigger(on: "roles")
     }
 
     func revert(on database: any Database) async throws {

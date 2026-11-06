@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: swift:6.3-noble
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: vapor_username
+          POSTGRES_PASSWORD: vapor_password
+          POSTGRES_DB: vapor_database
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U vapor_username -d vapor_database"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      DATABASE_HOST: db
+      DATABASE_NAME: vapor_database
+      DATABASE_USERNAME: open_erp_owner
+      DATABASE_PASSWORD: open_erp_owner_local
+      DATABASE_TLS_MODE: disable
+      PGHOST: db
+      PGDATABASE: vapor_database
+      PGUSER: vapor_username
+      PGPASSWORD: vapor_password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql
+        run: apt-get update && apt-get install -y postgresql-client
+      - name: Bootstrap database roles twice
+        run: |
+          psql -X -f Database/bootstrap.sql
+          psql -X -f Database/bootstrap.sql
+          psql -X -v ON_ERROR_STOP=1 -f Database/compose-passwords.sql
+      - name: Run tests
+        run: swift test
+      - name: Migrate as the owner and verify the audit trail
+        run: |
+          swift run open-erp migrate --yes
+          PGUSER=open_erp_owner PGPASSWORD=open_erp_owner_local psql -X -v ON_ERROR_STOP=1 \
+            -c 'REVOKE ALL ON TABLE public._fluent_migrations FROM open_erp_runtime'
+          swift run open-erp audit-verify

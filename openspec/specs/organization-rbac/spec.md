@@ -21,6 +21,7 @@ The system SHALL define permissions in code as `resource:action`, where action i
 - `approval_policy:create`, `approval_policy:read`, `approval_policy:update`, `approval_policy:delete`
 - `approval_request:read`
 - `approval_override:create`
+- `audit_event:read`
 
 #### Scenario: Unknown permission rejected
 - **WHEN** a client creates or updates a role with a permission string not in the catalog
@@ -33,6 +34,10 @@ The system SHALL define permissions in code as `resource:action`, where action i
 #### Scenario: Templates include approval permissions
 - **WHEN** an organization is provisioned
 - **THEN** "Organization Administrator" holds every approval permission including `approval_override:create`, and "Organization Viewer" holds `approval_policy:read` and `approval_request:read`
+
+#### Scenario: Templates include audit read
+- **WHEN** an organization is provisioned
+- **THEN** "Organization Administrator" and "Organization Viewer" both hold `audit_event:read`
 
 ### Requirement: Zero-trust enforcement
 A user SHALL hold an organization-level permission in an organization only if their active membership belongs, through an active group membership, to an active group in that organization that holds an active attachment to an active organization-level role whose permissions include it. Groups SHALL be the only path to a role. No permission SHALL be implied by a missing, null, or default value, by template origin, by company eligibility, or by the platform administrator flag.
@@ -247,3 +252,14 @@ The system SHALL expose `GET /permissions` to members holding `role:read`, listi
 #### Scenario: Not a member
 - **WHEN** a person calls with an organization they do not belong to
 - **THEN** the system responds `403 Forbidden`
+
+### Requirement: Audit route permission
+`GET /audit-events` SHALL require `audit_event:read`.
+
+#### Scenario: Permission grants access
+- **WHEN** a member whose role holds `audit_event:read` calls `GET /audit-events`
+- **THEN** the system responds `200`
+
+#### Scenario: Other organization's permission does not apply
+- **WHEN** a user holds `audit_event:read` in one organization and supplies another organization where they hold no such permission
+- **THEN** the system responds `403`

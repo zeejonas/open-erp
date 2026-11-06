@@ -20,6 +20,7 @@ struct CreateUser: AsyncMigration {
             .unique(on: "email")
             .unique(on: "auth_subject")
             .create()
+        try await database.createChangeTrigger(on: "users", redact: ["auth_subject"])
     }
 
     func revert(on database: any Database) async throws {

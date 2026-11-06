@@ -107,12 +107,6 @@ extension OpenERPTests {
             try await check(nil, invitationID: liveID)
             try await group.delete(on: app.db)
             try await check(.originalGroupUnavailable, invitationID: liveID)
-            let foreign = try await createOrganization(on: app.db, code: "OTHR", name: "Other")
-            let foreignGroup = AccessGroup(organizationID: try foreign.requireID(), name: "Foreign", createdByID: admin.id)
-            try await foreignGroup.save(on: app.db)
-            live.$group.id = foreignGroup.id
-            try await live.save(on: app.db)
-            try await check(.originalGroupUnavailable, invitationID: liveID)
             live.$group.id = nil
             try await live.save(on: app.db)
             try await check(.originalGroupUnavailable, invitationID: liveID)

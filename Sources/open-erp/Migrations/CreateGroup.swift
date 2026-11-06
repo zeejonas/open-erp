@@ -15,12 +15,14 @@ struct CreateGroup: AsyncMigration {
             .field("created_at", .datetime)
             .field("updated_at", .datetime)
             .field("deleted_at", .datetime)
+            .unique(on: "organization_id", "id")
             .create()
         try await database.createActiveUniqueIndex(
             "groups_active_name",
             on: "groups",
             columns: "organization_id", "name"
         )
+        try await database.createChangeTrigger(on: "groups")
     }
 
     func revert(on database: any Database) async throws {

@@ -118,11 +118,12 @@ func policyUsesGroup(_ groupID: UUID, on db: any Database) async throws -> Bool 
 }
 
 func replacePolicySlots(
-    policyID: UUID,
+    for policy: ApprovalPolicy,
     stages: [ApprovalStageDTO],
     actorID: UUID,
     on db: any Database
 ) async throws {
+    let policyID = try policy.requireID()
     let existing = try await ApprovalPolicySlot.query(on: db).filter(\.$policy.$id == policyID).all()
     for slot in existing {
         try await slot.softDelete(by: actorID, \.$deletedBy, on: db)
@@ -130,6 +131,7 @@ func replacePolicySlots(
     for (index, stage) in stages.enumerated() {
         for slot in stage.slots {
             try await ApprovalPolicySlot(
+                organizationID: policy.$organization.id,
                 policyID: policyID,
                 stage: index + 1,
                 groupID: slot.groupId,

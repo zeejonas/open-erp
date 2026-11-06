@@ -288,6 +288,7 @@ extension ProposedChange {
         case .groupMemberCreate(let draft):
             let membership = try await requireMembership(userID: draft.userId, organizationID: organizationID, on: db)
             let groupMembership = GroupMember(
+                organizationID: organizationID,
                 groupID: draft.groupId,
                 organizationUserID: try membership.requireID(),
                 createdByID: actorID
@@ -301,7 +302,7 @@ extension ProposedChange {
             try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupRoleCreate(let draft):
-            let link = GroupRole(groupID: draft.groupId, roleID: draft.roleId, createdByID: actorID)
+            let link = GroupRole(organizationID: organizationID, groupID: draft.groupId, roleID: draft.roleId, createdByID: actorID)
             try await conflictOnDuplicate(duplicateGroupRole) {
                 try await link.save(on: db)
             }
@@ -311,7 +312,7 @@ extension ProposedChange {
             try await link.softDelete(by: actorID, \.$deletedBy, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupCompanyCreate(let draft):
-            let link = GroupCompany(groupID: draft.groupId, companyID: draft.companyId, createdByID: actorID)
+            let link = GroupCompany(organizationID: organizationID, groupID: draft.groupId, companyID: draft.companyId, createdByID: actorID)
             try await conflictOnDuplicate(duplicateGroupCompany) {
                 try await link.save(on: db)
             }
@@ -334,8 +335,9 @@ extension ProposedChange {
                 )
                 try await policy.save(on: db)
                 let policyID = try policy.requireID()
-                try await replacePolicySlots(policyID: policyID, stages: definition.stages, actorID: actorID, on: db)
+                try await replacePolicySlots(for: policy, stages: definition.stages, actorID: actorID, on: db)
                 try await ApprovalPolicyVersion(
+                    organizationID: organizationID,
                     policyID: policyID,
                     version: 1,
                     definition: definition,
@@ -364,7 +366,7 @@ extension ProposedChange {
                 result.companyId = after.companyId
             }
             if changed.contains("stages") {
-                try await replacePolicySlots(policyID: try policy.requireID(), stages: after.stages, actorID: actorID, on: db)
+                try await replacePolicySlots(for: policy, stages: after.stages, actorID: actorID, on: db)
                 result.stages = after.stages
             }
             policy.currentVersion += 1
@@ -372,6 +374,7 @@ extension ProposedChange {
             let saved = try await conflictOnDuplicate(duplicatePolicy) {
                 try await policy.save(on: db)
                 try await ApprovalPolicyVersion(
+                    organizationID: organizationID,
                     policyID: try policy.requireID(),
                     version: policy.currentVersion,
                     definition: result.normalized(),

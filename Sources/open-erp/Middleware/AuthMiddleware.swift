@@ -6,9 +6,7 @@ import Vapor
 struct AuthMiddleware: AsyncMiddleware {
     func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
         let token = try await request.verifiedAccessToken()
-        guard let user = try await User.query(on: request.db)
-            .filter(\.$authSubject == token.subjectID)
-            .first()
+        guard let user = try await User.bound(to: token.subjectID, on: request.db)
         else {
             throw Abort(.forbidden)
         }

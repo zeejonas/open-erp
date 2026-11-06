@@ -32,5 +32,6 @@ func routes(_ app: Application) throws {
     try app.register(collection: GroupController())
     try app.register(collection: ApprovalPolicyController())
     try app.register(collection: ApprovalRequestController())
+    try app.register(collection: AuditEventController())
     registerAPIDocumentation(app)
 }

@@ -15,7 +15,7 @@ struct ApprovalService {
     func submit<T: AsyncResponseEncodable & Sendable>(_ change: ProposedChange) async throws -> ApprovalOutcome<T> {
         let requesterID = try request.userID()
         let organizationID = request.organizationID
-        return try await request.db.transaction { db in
+        return try await request.db.auditedTransaction(request.auditContext()) { db in
             try await change.check(on: db, organizationID: organizationID)
             let (result, held) = try await submitOrHold(
                 change,
@@ -56,6 +56,7 @@ struct ApprovalService {
             requestID: requestID,
             organizationID: organizationID,
             userID: userID,
+            context: try request.auditContext(),
             on: request.db
         )
     }
@@ -67,6 +68,7 @@ struct ApprovalService {
             organizationID: request.organizationID,
             userID: userID,
             comment: comment,
+            context: try request.auditContext(),
             on: request.db
         )
     }
@@ -77,6 +79,7 @@ struct ApprovalService {
             requestID: requestID,
             organizationID: request.organizationID,
             userID: userID,
+            context: try request.auditContext(),
             on: request.db
         )
     }
@@ -89,6 +92,7 @@ struct ApprovalService {
             reason: reason,
             operatorName: nil,
             actorID: userID,
+            context: try request.auditContext(),
             on: request.db
         )
     }
@@ -99,10 +103,11 @@ enum ApprovalActions {
         requestID: UUID,
         organizationID: UUID,
         userID: UUID,
+        context: AuditContext,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
         do {
-            return try await db.transaction { database in
+            return try await db.auditedTransaction(context.forApproval(requestID)) { database in
                 let approval = try await lockApprovalRequest(requestID, organizationID: organizationID, on: database)
                 try requirePending(approval)
                 let decisions = try await recordApprovals(
@@ -120,7 +125,7 @@ enum ApprovalActions {
                 return try await approval.detailedDTO(on: database)
             }
         } catch let failure as ApprovalApplyFailure {
-            return try await recordFailure(failure, requestID: requestID, organizationID: organizationID, on: db)
+            return try await recordFailure(failure, requestID: requestID, organizationID: organizationID, context: context, on: db)
         }
     }
 
@@ -129,10 +134,11 @@ enum ApprovalActions {
         organizationID: UUID,
         userID: UUID,
         comment: String?,
+        context: AuditContext,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
         let comment = try requiredText(comment, reason: "A comment is required")
-        return try await db.transaction { database in
+        return try await db.auditedTransaction(context.forApproval(requestID)) { database in
             let approval = try await lockApprovalRequest(requestID, organizationID: organizationID, on: database)
             try requirePending(approval)
             let tracks = try await eligibleTracks(
@@ -154,7 +160,7 @@ enum ApprovalActions {
                     operatorName: nil,
                     qualifyingGroupIDs: item.qualifyingGroupIDs,
                     comment: comment
-                ).insert(requestID: requestID, on: database)
+                ).insert(for: approval, on: database)
             }
             approval.status = ApprovalRequestStatus.rejected.rawValue
             try await approval.save(on: database)
@@ -167,9 +173,10 @@ enum ApprovalActions {
         requestID: UUID,
         organizationID: UUID,
         userID: UUID,
+        context: AuditContext,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
-        try await db.transaction { database in
+        try await db.auditedTransaction(context.forApproval(requestID)) { database in
             let approval = try await lockApprovalRequest(requestID, organizationID: organizationID, on: database)
             try requirePending(approval)
             guard approval.$requestedBy.id == userID else {
@@ -188,11 +195,12 @@ enum ApprovalActions {
         reason: String?,
         operatorName: String?,
         actorID: UUID?,
+        context: AuditContext,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
         let reason = try requiredText(reason, reason: "A reason is required")
         do {
-            return try await db.transaction { database in
+            return try await db.auditedTransaction(context.forApproval(requestID)) { database in
                 let approval = try await lockApprovalRequest(requestID, organizationID: organizationID, on: database)
                 try requirePending(approval)
                 if let actorID, actorID == approval.$requestedBy.id {
@@ -207,12 +215,12 @@ enum ApprovalActions {
                     qualifyingGroupIDs: [],
                     comment: reason
                 )
-                try await decision.insert(requestID: requestID, on: database)
+                try await decision.insert(for: approval, on: database)
                 try await applyApproved(approval, decisions: [decision], actorID: actorID, on: database)
                 return try await approval.detailedDTO(on: database)
             }
         } catch let failure as ApprovalApplyFailure {
-            return try await recordFailure(failure, requestID: requestID, organizationID: organizationID, on: db)
+            return try await recordFailure(failure, requestID: requestID, organizationID: organizationID, context: context, on: db)
         }
     }
 }
@@ -263,6 +271,7 @@ private func submitOrHold(
             throw Abort(.internalServerError, reason: "Approval policy is missing its current version")
         }
         try await ApprovalRequestTrack(
+            organizationID: organizationID,
             requestID: requestID,
             policyVersionID: try version.requireID(),
             currentStage: 1,
@@ -320,7 +329,7 @@ private func recordApprovals(
             qualifyingGroupIDs: item.qualifyingGroupIDs,
             comment: nil
         )
-        try await decision.insert(requestID: try approval.requireID(), on: db)
+        try await decision.insert(for: approval, on: db)
         recorded.append(decision)
         let approvals = try await ApprovalDecision.query(on: db)
             .filter(\.$track.$id == item.trackID)
@@ -448,15 +457,16 @@ private func recordFailure(
     _ failure: ApprovalApplyFailure,
     requestID: UUID,
     organizationID: UUID?,
+    context: AuditContext,
     on db: any Database
 ) async throws -> GetApprovalRequestDTO {
-    try await db.transaction { database in
+    try await db.auditedTransaction(context.forApproval(requestID)) { database in
         let approval = try await lockApprovalRequest(requestID, organizationID: organizationID, on: database)
         guard approval.status == ApprovalRequestStatus.pending.rawValue else {
             throw Abort(.conflict, reason: "Request is not pending")
         }
         for decision in failure.decisions {
-            try await decision.insert(requestID: requestID, on: database)
+            try await decision.insert(for: approval, on: database)
         }
         approval.status = ApprovalRequestStatus.failed.rawValue
         approval.failureReason = failure.reason

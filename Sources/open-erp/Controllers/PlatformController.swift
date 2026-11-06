@@ -77,7 +77,7 @@ struct PlatformController: RouteCollection {
             throw Abort(.badRequest, reason: "reason must not be empty")
         }
         let actorID = try req.userID()
-        let restored = try await req.db.transaction { db in
+        let restored = try await req.db.auditedTransaction(req.auditContext(actorType: .platformAdmin)) { db in
             let organization = try await lockOrganization(id, includingDeleted: true, on: db)
             guard let deletedAt = organization.deletedAt else {
                 throw Abort(.conflict, reason: "Organization is active")
@@ -143,7 +143,7 @@ struct PlatformController: RouteCollection {
         let actorID = try req.userID()
 
         return try await conflictOnDuplicate("An organization with this code already exists") {
-            try await req.db.transaction { db in
+            try await req.db.auditedTransaction(req.auditContext(actorType: .platformAdmin)) { db in
                 let organization = Organization(
                     code: dto.code,
                     name: dto.name,
@@ -189,7 +189,7 @@ struct PlatformController: RouteCollection {
             throw Abort(.badRequest, reason: "Reissue accepts no request body")
         }
         let actorID = try req.userID()
-        return try await req.db.transaction { db in
+        return try await req.db.auditedTransaction(req.auditContext(actorType: .platformAdmin)) { db in
             let organization = try await lockOrganization(id, on: db)
             guard organization.onboardedAt == nil,
                 try await !OrganizationInvitation.hasAcceptedOnboarding(organizationID: id, on: db),

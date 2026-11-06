@@ -7,7 +7,11 @@ func configure(_ app: Application, serving: Bool = true) async throws {
     // API setup resets middleware, so it runs before services.
     try configureAPI(app)
     try configureServices(app)
-    if serving { try await configureAuthentication(app) }
+    if serving {
+        app.storage[TrustedProxyCount.self] = try TrustedProxyCount.parse(Environment.get("TRUSTED_PROXY_COUNT"))
+        try await checkServingDatabaseRole(on: app.db, environment: app.environment, logger: app.logger)
+        try await configureAuthentication(app)
+    }
 }
 
 /// Registers the HTTP contract without runtime services or credentials.
@@ -34,6 +38,7 @@ func configureServices(_ app: Application) throws {
     // Fluent clamps an oversized page. Handlers reject it first; this limit is the backstop.
     app.fluent.pagination.pageSizeLimit = 100
 
+    app.migrations.add(CreateAuditEvent())
     app.migrations.add(CreateRevokedAccessToken())
     app.migrations.add(CreateUser())
     app.migrations.add(CreateOrganization())
@@ -58,4 +63,5 @@ func configureServices(_ app: Application) throws {
     app.asyncCommands.use(PruneRevokedTokensCommand(), as: "prune-revoked-tokens")
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
     app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")
+    app.asyncCommands.use(AuditVerifyCommand(), as: "audit-verify")
 }

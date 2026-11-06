@@ -9,6 +9,7 @@ struct CreateRevokedAccessToken: AsyncMigration {
             .field("expires_at", .datetime, .required)
             .field("revoked_at", .datetime, .required)
             .create()
+        try await db.createChangeTrigger(on: RevokedAccessToken.schema, redact: ["fingerprint"])
     }
 
     func revert(on db: any Database) async throws {

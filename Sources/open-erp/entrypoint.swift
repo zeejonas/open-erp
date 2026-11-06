@@ -1,3 +1,4 @@
+import Foundation
 import Vapor
 import Logging
 import NIOCore
@@ -22,17 +23,22 @@ enum Entrypoint {
         // app.logger.debug("Tried to install SwiftNIO's EventLoopGroup as Swift's global concurrency executor", metadata: ["success": .stringConvertible(executorTakeoverSuccess)])
         
         do {
-            let command = env.commandInput.arguments.first
-            if command == "export-openapi" {
-                try configureAPI(app)
-            } else {
-                try await configure(app, serving: command == nil || command == "serve")
+            do {
+                let command = env.commandInput.arguments.first
+                if command == "export-openapi" {
+                    try configureAPI(app)
+                } else {
+                    try await configure(app, serving: command == nil || command == "serve")
+                }
+            } catch {
+                // Vapor reports failures from execute() itself.
+                app.logger.report(error: error)
+                throw error
             }
             try await app.execute()
         } catch {
-            app.logger.report(error: error)
             try? await app.asyncShutdown()
-            throw error
+            exit(EXIT_FAILURE)
         }
         try await app.asyncShutdown()
     }

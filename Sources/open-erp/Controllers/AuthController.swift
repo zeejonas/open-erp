@@ -27,7 +27,10 @@ struct AuthController: RouteCollection {
         let record = RevokedAccessToken(bearer: bearer, claims: token)
         let inserted: Bool
         do {
-            inserted = try await record.insertIfAbsent(on: req.db)
+            let user = try await User.bound(to: token.subjectID, on: req.db)
+            inserted = try await req.db.auditedTransaction(req.auditContext(user: user, verifiedSubject: token.subjectID)) { db in
+                try await record.insertIfAbsent(on: db)
+            }
         } catch {
             // Never expose database errors, which can contain credential fingerprints.
             throw ProblemAbort(status: .serviceUnavailable, code: .authenticationUnavailable)

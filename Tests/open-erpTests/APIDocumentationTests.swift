@@ -26,7 +26,7 @@ struct APIDocumentationTests {
                 #expect(paths["/health"] == nil)
                 #expect(paths["/hello"] == nil)
                 #expect(paths["/"] == nil)
-                #expect(paths.values.reduce(0) { $0 + $1.count } == 57)
+                #expect(paths.values.reduce(0) { $0 + $1.count } == 59)
 
                 // Catch forgotten annotations and silent schema-generation failures on any route.
                 for route in app.routes.all where !["/health", "/docs", "/openapi.json"].contains("/" + route.path.map(\.description).joined(separator: "/")) {

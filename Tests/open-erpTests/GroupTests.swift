@@ -35,6 +35,7 @@ extension OpenERPTests {
             let emptyGroup = AccessGroup(organizationID: orgAID, name: "Empty", createdByID: try noRoles.requireID())
             try await emptyGroup.save(on: app.db)
             try await GroupMember(
+                organizationID: orgAID,
                 groupID: try emptyGroup.requireID(),
                 organizationUserID: try noRolesMembership.requireID(),
                 createdByID: try noRoles.requireID()
@@ -247,6 +248,7 @@ extension OpenERPTests {
                 .filter(\.$user.$id == clerk.requireID())
                 .first())
             try await GroupMember(
+                organizationID: orgAID,
                 groupID: try orphanGroup.requireID(),
                 organizationUserID: try orphanMembership.requireID(),
                 createdByID: adminID

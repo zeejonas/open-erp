@@ -196,6 +196,10 @@ final class User: Model, @unchecked Sendable {
         )
     }
 
+    static func bound(to subject: String, on db: any Database) async throws -> User? {
+        try await query(on: db).filter(\.$authSubject == subject).first()
+    }
+
     static func query(on db: any Database, organizationID: UUID) -> QueryBuilder<User> {
         query(on: db)
             .join(OrganizationUser.self, on: \User.$id == \OrganizationUser.$user.$id)
@@ -248,6 +252,9 @@ final class CompanyUser: Model, @unchecked Sendable {
     @ID(custom: .id, generatedBy: .database)
     var id: UUID?
 
+    @Parent(key: "organization_id")
+    var organization: Organization
+
     @Parent(key: "company_id")
     var company: Company
 
@@ -262,7 +269,8 @@ final class CompanyUser: Model, @unchecked Sendable {
 
     init() {}
 
-    init(companyID: UUID, userID: UUID, createdByID: UUID? = nil, deletedByID: UUID? = nil) {
+    init(organizationID: UUID, companyID: UUID, userID: UUID, createdByID: UUID? = nil, deletedByID: UUID? = nil) {
+        self.$organization.id = organizationID
         self.$company.id = companyID
         self.$user.id = userID
         self.$createdBy.id = createdByID

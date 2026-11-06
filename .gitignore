@@ -9,6 +9,7 @@ db.sqlite
 .env
 .env.*
 !.env.example
+!.env.testing
 default.profraw
 
 

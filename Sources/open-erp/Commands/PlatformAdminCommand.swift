@@ -15,6 +15,9 @@ struct PlatformAdminCommand: AsyncCommand {
         @Argument(name: "subject")
         var subject: String
 
+        @Option(name: "operator", help: "Name of the operator changing platform administrator access")
+        var operatorName: String?
+
         @Flag(name: "revoke", help: "Clear platform administrator access")
         var revoke: Bool
     }
@@ -24,7 +27,25 @@ struct PlatformAdminCommand: AsyncCommand {
     }
 
     func run(using context: CommandContext, signature: Signature) async throws {
-        let db = context.application.db
+        guard let operatorName = signature.operatorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !operatorName.isEmpty
+        else {
+            throw PlatformAdminCommandError(description: "Operator name is required")
+        }
+        try await context.application.db.auditedTransaction(AuditContext(actorType: .operator, actorName: operatorName)) { db in
+            try await changeAccess(signature, on: db)
+        }
+
+        let action = signature.revoke ? "Revoked" : "Granted"
+        context.application.logger.notice(
+            "\(action) platform administrator",
+            metadata: ["email": .string(signature.email), "subject": .string(signature.subject)]
+        )
+        let direction = signature.revoke ? "from" : "to"
+        context.console.print("\(action) platform administrator \(direction) \(signature.email)")
+    }
+
+    private func changeAccess(_ signature: Signature, on db: any Database) async throws {
         let existing = try await User.find(email: signature.email, on: db)
         if let existing, let bound = existing.authSubject, bound != signature.subject {
             throw PlatformAdminCommandError(description: "Subject conflict: \(signature.email) is bound to a different subject")
@@ -41,11 +62,6 @@ struct PlatformAdminCommand: AsyncCommand {
             }
             existing.isPlatformAdmin = false
             try await existing.save(on: db)
-            context.application.logger.notice(
-                "Revoked platform administrator",
-                metadata: ["email": .string(signature.email), "subject": .string(signature.subject)]
-            )
-            context.console.print("Revoked platform administrator from \(signature.email)")
             return
         }
 
@@ -65,11 +81,6 @@ struct PlatformAdminCommand: AsyncCommand {
             )
             try await user.save(on: db)
         }
-        context.application.logger.notice(
-            "Granted platform administrator",
-            metadata: ["email": .string(signature.email), "subject": .string(signature.subject)]
-        )
-        context.console.print("Granted platform administrator to \(signature.email)")
     }
 }
 
