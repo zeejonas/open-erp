@@ -58,7 +58,10 @@ extension OpenERPTests {
             let platform = try await createUser(on: app.db, email: "ops@example.com", subject: "ops", isPlatformAdmin: true)
             let platformToken = try await signAccessToken(on: app, subject: "ops")
             let memberToken = try await signAccessToken(on: app, subject: "member")
-            try await organization.softDelete(by: member.requireID(), \.$deletedBy, on: app.db)
+            _ = try await app.db.auditedTransaction(AuditContext(actorType: .user, actorID: member.id)) { db in
+                try await ProposedChange.organizationDelete(id: id, before: .init(code: organization.code, name: organization.name))
+                    .apply(on: db, actorID: member.requireID(), organizationID: id)
+            }
             let deleted = try #require(try await Organization.query(on: app.db).withDeleted().filter(\.$id == id).first())
             let path = "platform/organizations/\(id)"
             for (query, ids) in [("", []), ("deleted=false", []), ("deleted=true", [id])] {
@@ -104,6 +107,11 @@ extension OpenERPTests {
                 .filter(\.$recordID == id).filter(\.$operation == .restore).first())
             #expect(restoreEvent.actorType == .platformAdmin)
             #expect(restoreEvent.actorID == platform.id)
+            let publicHistory = try await BusinessEvent.query(on: app.db).filter(\.$resourceID == id).sort(\.$revision).all()
+            #expect(publicHistory.map(\.type) == [.organizationDeleted, .organizationRestored])
+            #expect(publicHistory.map(\.revision) == [1, 2])
+            #expect(publicHistory.last?.actorType == .platformAdmin)
+            try await expectProducedEvents(.restoration, on: app.db)
             try await restore(id.uuidString, token: platformToken, body: reason, status: .conflict)
 
             try await authorizedGet(app, "me/access", token: memberToken, organizationID: id) { res async throws in

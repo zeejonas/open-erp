@@ -79,6 +79,7 @@ extension OpenERPTests {
             try await app.testing().test(.POST, path, beforeRequest: { authorize(&$0, token: token) }, afterResponse: { #expect($0.status == .conflict) })
             #expect(try await Organization.find(id, on: app.db)?.onboardedAt == completed)
             #expect(try await OrganizationInvitation.query(on: app.db, organizationID: id).withDeleted().count() == 4)
+            try await expectProducedEvents(.onboarding, on: app.db)
         }
     }
 }

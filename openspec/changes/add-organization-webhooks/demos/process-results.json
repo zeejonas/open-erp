@@ -1,0 +1,32 @@
+{
+  "one": {
+    "replicas": 1,
+    "deliveries": 512,
+    "endpointDelayMilliseconds": 1000,
+    "elapsedSeconds": 34.868895458988845,
+    "deliveriesPerSecond": 14.683573805834783,
+    "peakInFlight": 16,
+    "peakPerSubscription": 2,
+    "organizationsInFirst32": 8,
+    "medianAttemptDurationSeconds": 1.0149625,
+    "durableDispatchesBeforeWorkerStart": 344,
+    "apiStoppedDuringCatchUp": true,
+    "workerOIDCVariables": false
+  },
+  "two": {
+    "replicas": 2,
+    "deliveries": 512,
+    "endpointDelayMilliseconds": 1000,
+    "elapsedSeconds": 18.277945917041507,
+    "deliveriesPerSecond": 28.01190037019614,
+    "peakInFlight": 32,
+    "peakPerSubscription": 4,
+    "organizationsInFirst32": 8,
+    "medianAttemptDurationSeconds": 1.0153485,
+    "durableDispatchesBeforeWorkerStart": 344,
+    "apiStoppedDuringCatchUp": true,
+    "workerOIDCVariables": false
+  },
+  "throughputRatio": 1.9077031750312112,
+  "topology": "independent Linux API and worker OS processes; isolated internal Docker network"
+}

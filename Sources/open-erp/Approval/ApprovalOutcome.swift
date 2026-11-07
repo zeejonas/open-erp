@@ -42,7 +42,7 @@ struct NewDecision: Sendable {
     var comment: String?
 
     func insert(for request: ApprovalRequest, on db: any Database) async throws {
-        try await ApprovalDecision(
+        let decision = ApprovalDecision(
             organizationID: request.$organization.id,
             requestID: try request.requireID(),
             trackID: trackID,
@@ -52,7 +52,10 @@ struct NewDecision: Sendable {
             operatorName: operatorName,
             qualifyingGroupIDs: qualifyingGroupIDs,
             comment: comment
-        ).save(on: db)
+        )
+        try await decision.save(on: db)
+        try await request.emit(.approvalDecisionRecorded, decision: decision, on: db)
+        if kind == .override { try await request.emit(.approvalRequestOverridden, decision: decision, on: db) }
     }
 }
 

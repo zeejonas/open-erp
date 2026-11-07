@@ -144,19 +144,23 @@ struct InvitationController: RouteCollection {
 
                 let membership = OrganizationUser(organizationID: organizationID, userID: userID, createdByID: userID)
                 try await membership.save(on: db)
+                try await membership.emit(.organizationUserCreated, on: db)
 
                 if let groupID = current.$group.id {
-                    try await GroupMember(
+                    let member = GroupMember(
                         organizationID: organizationID,
                         groupID: groupID,
                         organizationUserID: try membership.requireID(),
                         createdByID: userID
-                    ).save(on: db)
+                    )
+                    try await member.save(on: db)
+                    try await member.emit(.groupMemberCreated, on: db)
                 }
 
                 current.acceptedAt = Date()
                 current.$acceptedBy.id = userID
                 try await current.save(on: db)
+                try await current.emit(.invitationAccepted, on: db)
                 if current.isOnboarding {
                     organization.onboardedAt = current.acceptedAt
                     organization.$updatedBy.id = userID

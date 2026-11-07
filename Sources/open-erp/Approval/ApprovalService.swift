@@ -16,6 +16,7 @@ struct ApprovalService {
         let requesterID = try request.userID()
         let organizationID = request.organizationID
         return try await request.db.auditedTransaction(request.auditContext()) { db in
+            try await change.authorizeWebhook(requesterID: requesterID, organizationID: organizationID, on: db)
             try await change.check(on: db, organizationID: organizationID)
             let (result, held) = try await submitOrHold(
                 change,
@@ -164,6 +165,7 @@ enum ApprovalActions {
             }
             approval.status = ApprovalRequestStatus.rejected.rawValue
             try await approval.save(on: database)
+            try await approval.emit(.approvalRequestRejected, on: database)
             try await revokeHeldInvitation(requestID: requestID, actorID: userID, on: database)
             return try await approval.detailedDTO(on: database)
         }
@@ -184,6 +186,7 @@ enum ApprovalActions {
             }
             approval.status = ApprovalRequestStatus.withdrawn.rawValue
             try await approval.save(on: database)
+            try await approval.emit(.approvalRequestWithdrawn, on: database)
             try await revokeHeldInvitation(requestID: requestID, actorID: userID, on: database)
             return try await approval.detailedDTO(on: database)
         }
@@ -262,6 +265,12 @@ private func submitOrHold(
     )
     try await approval.save(on: db)
     let requestID = try approval.requireID()
+    let context = try await db.requireSQL().raw("SELECT current_setting('audit.context') AS context").first()
+    if let json = try context?.decode(column: "context", as: String.self) {
+        let attribution = try JSONDecoder().decode(AuditContext.self, from: Data(json.utf8))
+        try await db.setAuditContext(attribution.forApproval(requestID))
+    }
+    try await approval.emit(.approvalRequestCreated, on: db)
     for policy in matches {
         guard let version = try await ApprovalPolicyVersion.query(on: db)
             .filter(\.$policy.$id == policy.requireID())
@@ -444,10 +453,12 @@ private func applyApproved(
         guard let permission = Permission(rawValue: approval.permission), permissions.contains(permission) else {
             throw Abort(.forbidden, reason: "Requester no longer holds \(approval.permission)")
         }
+        try await approval.change.authorizeWebhook(requesterID: requesterID, organizationID: organizationID, on: db)
         try await approval.change.check(on: db, organizationID: organizationID)
         _ = try await approval.change.apply(on: db, actorID: requesterID, organizationID: organizationID)
         approval.status = ApprovalRequestStatus.applied.rawValue
         try await approval.save(on: db)
+        try await approval.emit(.approvalRequestApplied, on: db)
     } catch let abort as any AbortError {
         throw ApprovalApplyFailure(reason: abort.reason, decisions: decisions, actorID: actorID)
     }
@@ -471,6 +482,7 @@ private func recordFailure(
         approval.status = ApprovalRequestStatus.failed.rawValue
         approval.failureReason = failure.reason
         try await approval.save(on: database)
+        try await approval.emit(.approvalRequestFailed, on: database)
         try await revokeHeldInvitation(
             requestID: requestID,
             actorID: failure.actorID ?? approval.$requestedBy.id,

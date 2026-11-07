@@ -364,3 +364,169 @@ New explicit codes require documented recovery semantics and tests.
 - [Vapor Documentation](https://docs.vapor.codes)
 - [Vapor GitHub](https://github.com/vapor)
 - [Vapor Community maintained packages](https://github.com/vapor-community)
+
+
+## Organization webhooks
+
+Webhooks publish supported organization, company, role, group, relationship, invitation,
+and approval transitions. Discover the explicit version 1 catalog at
+`GET /webhook-event-types`; `/openapi.json` and `export-openapi` include the complete
+allowlisted envelope and summary schemas. No wildcard subscribes to future event types.
+Metadata history is available through `/webhook-events`, `/webhook-deliveries`, delivery
+`/:id/attempts`, subscription `/:id/versions`, and subscription `/:id/health`.
+All tenant routes require a bearer token, active membership, and `X-Organization-ID`.
+
+Create a subscription with `POST /webhook-subscriptions`, supplying `name`, `url`,
+`eventTypes`, and `companyIds` (an empty list means organization-wide). Creation is
+disabled. PATCH with the current `expectedRevisionId` and `enabled: true` to activate.
+A company filter is valid only for company and group-company events and active companies
+in that organization. Other event types have a null `companyId`, including approvals.
+The limit is 100 non-deleted subscriptions per organization. Configuration versions are
+immutable; held changes fail if another version applies first.
+
+Subscription create/update/delete can require approval. Update policies can independently
+gate `name`, `url`, `eventTypes`, `companyIds`, `enabled`, and `rotateSecret`. The requester
+must retain management and selected source-read grants at application; creation, expansion,
+and enablement additionally require `webhook_payload:read`. Organization integrations
+continue independently of the creator's later membership or login session. No webhook
+approval policy is installed automatically.
+
+`POST /webhook-subscriptions/:id/disable` requires `webhook_subscription:disable` and
+immediately stops new authorizations, bypassing approval. Changing destinations or narrowing
+scopes cancels unauthorized queued work rather than redirecting it. Requests already
+authorized can finish, and their outcomes remain evidence. Name changes and rotation preserve
+otherwise-authorized work. Organization deletion disables integrations and cancels queued
+tenant work; restoration never re-enables subscriptions or revives cancelled deliveries.
+
+The administrator template has every webhook permission. The viewer template has subscription,
+event, and delivery metadata reads, and explicitly excludes `webhook_payload:read` and
+`webhook_secret:read`. Management permissions do not imply either. Delivery payload inspection
+also requires the event's source-read permission. Platform administrator status does not grant
+these tenant capabilities. List routes reject undeclared/repeated parameters and have stable
+paging; their exact filters and timestamp order are published in OpenAPI.
+
+### Receiver verification and delivery semantics
+
+Use a [Standard Webhooks receiver library](https://github.com/standard-webhooks/standard-webhooks)
+and the raw request bytes. For example, the Python library verifies HMAC and timestamp freshness:
+
+```python
+from standardwebhooks.webhooks import Webhook
+
+# raw_body is the received bytes, before JSON parsing or re-encoding.
+event = Webhook(subscription_secret).verify(raw_body, request_headers)
+```
+
+The sender signs `webhook-id.webhook-timestamp.raw-body` using HMAC-SHA256, with
+`webhook-signature: v1,<base64>`. `webhook-id` is the stable event UUID; the independent
+`X-OpenERP-Attempt-ID` changes on each authorized attempt. Timestamps are fresh on retries.
+Verify freshness with the library and keep clocks synchronized. Secret retrieval through
+`POST /webhook-subscriptions/:id/secret` requires `webhook_secret:read`; each disclosure is
+recorded before its `no-store` response. PATCH `rotateSecret: true` with the expected revision
+to rotate, subject to update approval. Retrieve the newly applied secret through the same
+recorded endpoint. Rotation is immediate and subsequent authorized attempts use only the new
+secret; coordinate receivers accordingly. Dual signing is not supported in this release.
+
+Deduplicate event IDs durably and atomically with business effects, or with insertion into a
+durable internal processing queue. Acknowledge only after that transaction commits. Retain
+receiver deduplication records for at least the 72-hour retry horizon plus operational recovery
+margin. The sender can retry when a receiver accepted a request but its acknowledgment was
+lost or a worker crashed. A 2xx response, including 202, means HTTP receipt; it does not prove
+that downstream business processing finished. Neither global nor per-subscription ordering,
+contiguous filtered revisions, nor exactly-once external effects are promised.
+
+Events are captured even without subscriptions. Dispatch uses the highest configuration
+version committed and visible at event capture, including explicit ordering inside the same
+transaction, so later enablement and scope expansion do not receive historical events.
+Filters can create revision gaps; organization restoration continues its resource revision
+stream and does not restore deleted child resources. Payloads retain their original bytes
+and never expand automatically with model DTOs. Bodies exclude invitation identities/tokens,
+operator names, approval comments/proposed changes, secrets, and raw failure diagnostics.
+
+Network failures, 408, 425, 429, and 5xx retry with full jitter starting at five seconds and
+capped at six hours, within 72 hours of the first authorized attempt. Valid Retry-After on
+429/503 is bounded by that deadline. Other responses, including redirects, are terminal.
+Worker downtime before the first attempt does not consume the window. Expired in-flight
+leases produce immutable `unknown` outcomes before safe retry, with the original event ID.
+Continuous failure for 72 hours automatically pauses the subscription, records system
+attribution and cancels its queued work. Acknowledgment clears `failingSince`; re-enabling a
+paused integration follows ordinary approval and clears it as well. Health flags auto-pause,
+queues older than five minutes, and exhaustion since the last acknowledgment. Re-enablement
+only permits future events; cancelled/exhausted work is retained and has no replay route.
+
+### API and worker deployment
+
+Provide a base64-encoded 32-byte `WEBHOOK_KEY_ENCRYPTION_KEY` through deployment secret
+injection to every API and worker process. For a disposable local deployment, generate one
+outside the repository and preserve it across restarts. This key encrypts unique per-subscription
+`whsec_` signing secrets with AES-GCM bound to organization, subscription and secret ID;
+it is never a signing secret. API/worker startup fails for a missing or malformed key without
+printing its value. Commands applying subscription creation/rotation need the key; unrelated
+migrations, audit verification, pruning, and offline OpenAPI export remain independent.
+Test fixtures inject isolated keys; the test-only receiver certificate/key under Tests is
+not used by or copied into the runtime image.
+
+The same executable/image runs independent processes:
+
+```sh
+docker compose run --rm migrate
+docker compose up -d app webhook-worker
+docker compose stop webhook-worker       # API writes still commit durable publication work
+docker compose up -d --scale webhook-worker=2 webhook-worker
+docker compose stop app                  # workers continue delivering committed work
+```
+
+API serving does not start worker loops. Workers do not listen on HTTP or initialize
+OIDC/JWKS. Both require a safe runtime database role in production. Configure the shared
+pool limits identically on every worker:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `WEBHOOK_WORKER_CONCURRENCY` | 16 | In-flight attempts per process |
+| `WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION` | 4 | Exact shared endpoint ceiling |
+| `WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION` | 8 | Approximate shared tenant fairness ceiling |
+| `WEBHOOK_POLL_INTERVAL_MS` | 1000 | Idle dispatcher/sender polling interval |
+
+All values must be positive integers, with subscription limit no larger than organization
+limit. Each replica adds process capacity; organization counting can briefly overshoot under
+concurrent claims. Claims lock one subscription and then one delivery, use SKIP LOCKED and
+partial unfinished-work indexes, and hold no database transaction across HTTP. Requests have
+a ten-second HTTP deadline and sixty-second lease. SIGTERM/SIGINT stop claims and cancel
+in-flight tasks; Compose allows thirty seconds before termination. Unfinished starts survive
+restart and recover as unknown. Size database connection budgets for separate API and worker
+pools: each process can use event-loop count times `DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP`
+connections. Increasing replicas also increases this upper bound.
+
+Every sixty seconds a worker logs its in-flight count, dispatch lag, oldest due queue age,
+and median/maximum claim duration. Health includes median attempt duration over 24 hours.
+Logs omit payloads, response bodies and secrets. Use these measurements before changing
+limits or adopting deferred connection reuse, batch claims, or partitioning.
+
+Restrict worker egress to the destinations your deployment permits. URLs require HTTPS on
+443 with a hostname and no credentials, query or fragment. Every attempt vets all resolved
+IPv4/IPv6 addresses, rejects non-public/metadata destinations, pins connection establishment
+to a vetted numeric address, retains original-host TLS/SNI verification and refuses redirects.
+Network controls remain valuable alongside the application check. The initial transport uses
+a separate bounded client per attempt, sharing event loops and closing it afterward.
+
+### Webhook migration and recovery
+
+This repository is pre-release: each table has one owning create migration, and existing
+create definitions are edited in place. Reset disposable pre-release databases and run fresh
+migrations; do not upgrade retained databases through ad hoc ALTER scripts or silently promote
+custom roles. Fresh template copies include the new permissions; existing copied roles are
+ordinary data and are never automatically broadened.
+
+Back up the encryption key securely with the database recovery procedure, separately from
+ordinary source/configuration backups, and test restoring both together. Losing or replacing
+it makes stored signing secrets unavailable. Events, configuration revisions, secret reveals,
+and delivery entries are immutable and retained indefinitely; audit snapshots omit duplicated
+payload bytes and ciphertext. Queue scheduling is mutable; delivery INSERT/DELETE are audited
+and its attempt/cancellation ledger carries scheduling evidence. The transient dispatch queue
+has no row-capture trigger. `audit-verify` enforces these exact capture scopes.
+
+For rollback, stop workers first and preserve evidence, the key, dispatch records and delivery
+state. Correct schema/code forward and restart with the same key/runtime credentials. Avoid
+manual evidence rewrites or evidence deletion. Receiver idempotency handles unknown remote
+outcomes. Replay, synthetic deliveries, cross-table reconciliation, archive infrastructure and
+production retention policy are separate changes.

@@ -54,6 +54,15 @@ extension OpenERPTests {
             ProtectedRoute(method: .DELETE, path: "approval-policies/\(missingID)", permission: .approvalPolicyDelete),
             ProtectedRoute(method: .GET, path: "approval-requests", permission: .approvalRequestRead),
             ProtectedRoute(method: .POST, path: "approval-requests/\(missingID)/override", permission: .approvalOverrideCreate),
+            ProtectedRoute(method: .POST, path: "webhook-subscriptions", permission: .webhookSubscriptionCreate),
+            ProtectedRoute(method: .GET, path: "webhook-subscriptions", permission: .webhookSubscriptionRead),
+            ProtectedRoute(method: .PATCH, path: "webhook-subscriptions/\(missingID)", permission: .webhookSubscriptionUpdate),
+            ProtectedRoute(method: .DELETE, path: "webhook-subscriptions/\(missingID)", permission: .webhookSubscriptionDelete),
+            ProtectedRoute(method: .POST, path: "webhook-subscriptions/\(missingID)/disable", permission: .webhookSubscriptionDisable),
+            ProtectedRoute(method: .POST, path: "webhook-subscriptions/\(missingID)/secret", permission: .webhookSecretRead),
+            ProtectedRoute(method: .GET, path: "webhook-event-types", permission: .webhookEventRead),
+            ProtectedRoute(method: .GET, path: "webhook-deliveries", permission: .webhookDeliveryRead),
+            ProtectedRoute(method: .GET, path: "webhook-events/\(missingID)/payload", permission: .webhookPayloadRead),
         ]
 
         try await withApp { app in
@@ -223,6 +232,7 @@ extension OpenERPTests {
             }, afterResponse: { res async in
                 #expect(res.status == .ok, "A deleted role's name can be reused")
             })
+            try await expectProducedEvents([.roleCreated, .roleUpdated], on: app.db)
         }
     }
 

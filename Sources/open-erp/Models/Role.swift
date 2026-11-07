@@ -85,6 +85,7 @@ final class Role: Model, @unchecked Sendable {
             )
             try await role.save(on: db)
             try await role.setPermissions(template.permissions, actorID: createdByID, on: db)
+            try await role.emit(.roleCreated, on: db)
             created.append(role)
         }
         return created

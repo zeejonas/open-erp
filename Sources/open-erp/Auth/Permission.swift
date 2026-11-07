@@ -40,6 +40,15 @@ enum Permission: String, Codable, CaseIterable, Sendable {
     case approvalRequestRead = "approval_request:read"
     case approvalOverrideCreate = "approval_override:create"
     case auditEventRead = "audit_event:read"
+    case webhookSubscriptionCreate = "webhook_subscription:create"
+    case webhookSubscriptionRead = "webhook_subscription:read"
+    case webhookSubscriptionUpdate = "webhook_subscription:update"
+    case webhookSubscriptionDelete = "webhook_subscription:delete"
+    case webhookSubscriptionDisable = "webhook_subscription:disable"
+    case webhookEventRead = "webhook_event:read"
+    case webhookPayloadRead = "webhook_payload:read"
+    case webhookDeliveryRead = "webhook_delivery:read"
+    case webhookSecretRead = "webhook_secret:read"
 
     /// Every permission shipped in this change is organization-wide.
     /// Company-scoped permissions arrive with company-level enforcement.
@@ -65,7 +74,9 @@ struct RoleTemplate: Sendable {
         key: "org_viewer",
         name: "Organization Viewer",
         level: .organization,
-        permissions: Permission.allCases.filter { $0.level == .organization && $0.isRead }
+        permissions: Permission.allCases.filter {
+            $0.level == .organization && $0.isRead && $0 != .webhookPayloadRead && $0 != .webhookSecretRead
+        }
     )
 
     static let all = [organizationAdministrator, organizationViewer]

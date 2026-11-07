@@ -33,5 +33,8 @@ func routes(_ app: Application) throws {
     try app.register(collection: ApprovalPolicyController())
     try app.register(collection: ApprovalRequestController())
     try app.register(collection: AuditEventController())
+    try app.register(collection: WebhookSubscriptionController())
+    try app.register(collection: WebhookEventController())
+    try app.register(collection: WebhookDeliveryController())
     registerAPIDocumentation(app)
 }

@@ -26,8 +26,15 @@ enum ProposedChange: Codable, Equatable, Sendable {
     case approvalPolicyUpdate(id: UUID, before: ApprovalPolicyDefinition, after: ApprovalPolicyDefinition)
     case approvalPolicyDelete(id: UUID, before: ApprovalPolicyDefinition)
 
+    case webhookSubscriptionCreate(WebhookConfiguration)
+    case webhookSubscriptionUpdate(id: UUID, expectedRevisionID: UUID, before: WebhookConfiguration, after: WebhookConfiguration, rotateSecret: Bool)
+    case webhookSubscriptionDelete(id: UUID, expectedRevisionID: UUID)
+
     var permission: Permission {
         switch self {
+        case .webhookSubscriptionCreate: .webhookSubscriptionCreate
+        case .webhookSubscriptionUpdate: .webhookSubscriptionUpdate
+        case .webhookSubscriptionDelete: .webhookSubscriptionDelete
         case .organizationUpdate: .organizationUpdate
         case .organizationDelete: .organizationDelete
         case .companyCreate: .companyCreate
@@ -64,6 +71,8 @@ enum ProposedChange: Codable, Equatable, Sendable {
 
     var targetID: UUID? {
         switch self {
+        case .webhookSubscriptionUpdate(let id, _, _, _, _), .webhookSubscriptionDelete(let id, _): id
+        case .webhookSubscriptionCreate: nil
         case .organizationUpdate(let id, _, _), .organizationDelete(let id, _): id
         case .companyUpdate(let id, _, _), .companyDelete(let id, _): id
         case .organizationUserDelete(let userID): userID
@@ -82,6 +91,8 @@ enum ProposedChange: Codable, Equatable, Sendable {
     /// Fields whose value differs. Set-valued fields such as `permissions` compare as sets.
     func changedFields() -> Set<String> {
         switch self {
+        case .webhookSubscriptionUpdate(_, _, let before, let after, let rotate):
+            return after.changedFields(from: before).union(rotate ? ["rotateSecret"] : [])
         case .organizationUpdate(_, let before, let after), .companyUpdate(_, let before, let after):
             return differing(["code": before.code != after.code, "name": before.name != after.name])
         case .roleUpdate(_, let before, let after):
@@ -134,6 +145,7 @@ extension ProposedChange {
         case targetId
         case before
         case after
+        case expectedRevisionId, rotateSecret
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -143,6 +155,15 @@ extension ProposedChange {
             try container.encode(targetID, forKey: .targetId)
         }
         switch self {
+        case .webhookSubscriptionCreate(let after):
+            try container.encode(after, forKey: .after)
+        case .webhookSubscriptionUpdate(_, let expected, let before, let after, let rotate):
+            try container.encode(expected, forKey: .expectedRevisionId)
+            try container.encode(before, forKey: .before)
+            try container.encode(after, forKey: .after)
+            try container.encode(rotate, forKey: .rotateSecret)
+        case .webhookSubscriptionDelete(_, let expected):
+            try container.encode(expected, forKey: .expectedRevisionId)
         case .organizationUpdate(_, let before, let after), .companyUpdate(_, let before, let after):
             try container.encode(before, forKey: .before)
             try container.encode(after, forKey: .after)
@@ -197,6 +218,17 @@ extension ProposedChange {
             )
         }
         switch permission {
+        case .webhookSubscriptionCreate:
+            self = .webhookSubscriptionCreate(try container.decode(WebhookConfiguration.self, forKey: .after))
+        case .webhookSubscriptionUpdate:
+            self = .webhookSubscriptionUpdate(id: try container.decode(UUID.self, forKey: .targetId),
+                expectedRevisionID: try container.decode(UUID.self, forKey: .expectedRevisionId),
+                before: try container.decode(WebhookConfiguration.self, forKey: .before),
+                after: try container.decode(WebhookConfiguration.self, forKey: .after),
+                rotateSecret: try container.decode(Bool.self, forKey: .rotateSecret))
+        case .webhookSubscriptionDelete:
+            self = .webhookSubscriptionDelete(id: try container.decode(UUID.self, forKey: .targetId),
+                expectedRevisionID: try container.decode(UUID.self, forKey: .expectedRevisionId))
         case .organizationUpdate:
             self = .organizationUpdate(
                 id: try container.decode(UUID.self, forKey: .targetId),

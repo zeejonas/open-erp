@@ -93,6 +93,7 @@ struct PlatformController: RouteCollection {
             organization.$updatedBy.id = actorID
             organization.updatedAt = Date()
             try await organization.restore(on: db)
+            try await organization.emit(.organizationRestored, on: db)
             return try PlatformOrganizationDTO(organization)
         }
         req.logger.notice("Organization restored", metadata: [
@@ -152,6 +153,7 @@ struct PlatformController: RouteCollection {
                     deletedBy: nil
                 )
                 try await organization.save(on: db)
+                try await organization.emit(.organizationCreated, on: db)
                 let organizationID = try organization.requireID()
 
                 let roles = try await Role.copyTemplates(into: organizationID, createdByID: actorID, on: db)
@@ -170,6 +172,7 @@ struct PlatformController: RouteCollection {
                     isOnboarding: true,
                     on: db
                 )
+                try await invitation.emit(.invitationIssued, on: db)
                 return ProvisionOrganizationResponse(
                     organization: organization.toGetDTO(),
                     invitationToken: token,
@@ -199,11 +202,13 @@ struct PlatformController: RouteCollection {
             else { throw Abort(.conflict, reason: "Onboarding cannot be reissued") }
             if previous.deletedAt == nil {
                 try await previous.softDelete(by: actorID, \.$deletedBy, on: db)
+                try await previous.emit(.invitationRevoked, on: db)
             }
             let (invitation, token) = try await OrganizationInvitation.issue(
                 organizationID: id, email: previous.email, firstName: previous.firstName,
                 lastName: previous.lastName, groupID: groupID, createdByID: actorID,
                 isOnboarding: true, on: db)
+            try await invitation.emit(.invitationReissued, on: db)
             return ProvisionOrganizationResponse(organization: organization.toGetDTO(),
                 invitationToken: token, invitation: invitation.toGetDTO())
         }

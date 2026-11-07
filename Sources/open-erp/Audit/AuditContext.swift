@@ -7,7 +7,7 @@ enum AuditActorType: String, Codable, CaseIterable, Sendable {
     case user, platformAdmin = "platform_admin", `operator`, system, database
 }
 
-struct AuditContext: Encodable, Sendable {
+struct AuditContext: Codable, Sendable {
     let actorType: AuditActorType
     var actorID: UUID?
     var actorName: String?

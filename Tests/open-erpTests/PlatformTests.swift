@@ -68,7 +68,10 @@ extension OpenERPTests {
             #expect(adminPermissions.contains(Permission.approvalOverrideCreate.rawValue))
             #expect(viewerRole.name == "Organization Viewer")
             let viewerPermissions = Set(viewerRole.permissionGrants.map(\.permission))
-            #expect(viewerPermissions == Set(Permission.allCases.filter(\.isRead).map(\.rawValue)))
+            #expect(viewerPermissions == Set(RoleTemplate.organizationViewer.permissions.map(\.rawValue)))
+            #expect(!viewerPermissions.contains(Permission.webhookPayloadRead.rawValue))
+            #expect(!viewerPermissions.contains(Permission.webhookSecretRead.rawValue))
+            #expect(viewerPermissions.contains(Permission.webhookDeliveryRead.rawValue))
             #expect(viewerPermissions.isSuperset(of: [
                 Permission.approvalPolicyRead.rawValue,
                 Permission.approvalRequestRead.rawValue,
@@ -195,6 +198,7 @@ extension OpenERPTests {
             #expect(try await OrganizationInvitation.query(on: app.db).filter(\.$email == "second@acme.com").count() == 0)
             #expect(try await AccessGroup.query(on: app.db).filter(\.$templateKey == GroupTemplate.organizationAdministrators.key).count() == 2)
             _ = stranger
+            try await expectProducedEvents(.provisioning, on: app.db)
         }
     }
 }

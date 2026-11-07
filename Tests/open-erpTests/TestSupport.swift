@@ -7,15 +7,20 @@ import VaporTesting
 
 @discardableResult
 func withApp<T>(_ test: (Application) async throws -> T) async throws -> T {
+    try await withApp(serving: true, test)
+}
+
+@discardableResult
+func withApp<T>(serving: Bool, _ test: (Application) async throws -> T) async throws -> T {
     let app = try await Application.make(.testing)
     let result: T
     do {
-        try await configure(app)
+        try await configure(app, serving: serving)
         try await app.autoMigrate()
         result = try await test(app)
         try await app.autoRevert()
     } catch {
-        try? await app.autoRevert()
+        if !app.databases.ids().isEmpty { try? await app.autoRevert() }
         try await app.asyncShutdown()
         throw error
     }

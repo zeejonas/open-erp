@@ -34,6 +34,8 @@ extension OpenERPTests {
             let permissions = Set(entries.map(\.permission))
             #expect(permissions == Set(Permission.allCases.filter(ApprovalCatalog.isGateable).map(\.rawValue)))
             #expect(!permissions.contains { $0.hasSuffix(":read") || $0 == Permission.approvalOverrideCreate.rawValue })
+            #expect(!permissions.contains(Permission.webhookSubscriptionDisable.rawValue))
+            #expect(entries.first { $0.permission == Permission.webhookSubscriptionUpdate.rawValue }?.fields == ["name", "url", "eventTypes", "companyIds", "enabled", "rotateSecret"])
             #expect(entries.first { $0.permission == "organization:update" }?.fields == ["code", "name"])
             #expect(entries.first { $0.permission == "company:update" }?.fields == ["code", "name"])
             #expect(entries.first { $0.permission == "role:update" }?.fields == ["name", "permissions"])
@@ -293,6 +295,7 @@ extension OpenERPTests {
             )
             try requireStatus(passed, .ok)
             #expect(try passed.content.decode(GetRoleDTO.self).name == "Auditors renamed")
+            try await expectProducedEvents(.policy, on: app.db)
         }
     }
 
@@ -687,6 +690,11 @@ extension OpenERPTests {
             let saved = try #require(try await Company.find(companyID, on: app.db))
             #expect(saved.name == "Approved")
             #expect(saved.$updatedBy.id == clerk.id)
+            let publicUpdate = try #require(try await BusinessEvent.query(on: app.db)
+                .filter(\.$resourceID == companyID).filter(\.$type == .companyUpdated).first())
+            #expect(publicUpdate.actorID == approvers.members[0].id)
+            #expect(publicUpdate.requestedByID == clerk.id)
+            #expect(publicUpdate.approvalRequestID == request.id)
 
             let edited = try await api(
                 app, .PATCH, "approval-policies/\(policyID)",
@@ -734,6 +742,9 @@ extension OpenERPTests {
             #expect(staleApproval.failureReason?.contains("changed") == true)
             #expect(staleApproval.decisions.map(\.kind) == ["approve"])
             #expect(try await Company.find(staleID, on: app.db)?.name == "Direct")
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$resourceID == staleID).filter(\.$type == .companyUpdated).count() == 0)
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$approvalRequestID == staleRequest.id)
+                .filter(\.$type == .approvalDecisionRecorded).count() == 1)
 
             let createPolicy = try await postPolicy(
                 app, tenant: tenant,
@@ -770,6 +781,9 @@ extension OpenERPTests {
             #expect(Set(results.map(\.status)) == [.ok, .conflict])
             #expect(try await Company.find(raceID, on: app.db)?.name == "Race end")
             #expect(try await ApprovalRequest.find(race.id, on: app.db)?.status == "applied")
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$resourceID == raceID).filter(\.$type == .companyUpdated).count() == 1)
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$approvalRequestID == race.id)
+                .filter(\.$type == .approvalRequestApplied).count() == 1)
 
             let lostPolicy = try await postPolicy(
                 app, tenant: tenant,
@@ -792,6 +806,7 @@ extension OpenERPTests {
             #expect(lostApproval.status == "failed")
             #expect(lostApproval.failureReason?.contains("company:update") == true)
             #expect(try await Company.find(lostID, on: app.db)?.name == "Still")
+            try await expectProducedEvents(.approvalApply, on: app.db)
         }
     }
 
@@ -970,6 +985,7 @@ extension OpenERPTests {
                 token: approvers.members[0].token, organizationID: orgID
             )
             try requireStatus(late, .conflict)
+            try await expectProducedEvents(.approvalRequests, on: app.db)
         }
     }
 
@@ -1066,6 +1082,12 @@ extension OpenERPTests {
             #expect(decision.$decidedBy.id == nil)
             #expect(decision.operatorName == "Pat Operator")
             #expect(decision.comment == "audit fix")
+            let publicOverride = try #require(try await BusinessEvent.query(on: app.db).filter(\.$resourceID == stuckCompany)
+                .filter(\.$type == .companyUpdated).first())
+            #expect(publicOverride.actorType == .operator)
+            #expect(publicOverride.requestedByID == clerk.id)
+            #expect(!String(decoding: publicOverride.payload, as: UTF8.self).contains("Pat Operator"))
+            #expect(!String(decoding: publicOverride.payload, as: UTF8.self).contains("audit fix"))
 
             let decisionsBefore = try await ApprovalDecision.query(on: app.db).filter(\.$request.$id == stuck.id).count()
             var closed = CommandContext(
@@ -1083,6 +1105,7 @@ extension OpenERPTests {
             }
             #expect(try await Company.find(stuckCompany, on: app.db)?.name == "Unstuck")
             #expect(try await ApprovalDecision.query(on: app.db).filter(\.$request.$id == stuck.id).count() == decisionsBefore)
+            try await expectProducedEvents(.approvalOverride, on: app.db)
         }
     }
 
@@ -1129,6 +1152,7 @@ extension OpenERPTests {
                 .first()
             #expect(stored?.tokenHash != token)
             #expect(stored?.$approvalRequest.id == held.id)
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$type == .invitationIssued).count() == 0)
 
             let hidden = try await api(
                 app, .GET, "approval-requests/\(held.id)",
@@ -1148,6 +1172,8 @@ extension OpenERPTests {
             try await waiting.update(on: app.db)
             let applied = try await approve(app, tenant: tenant, requestID: held.id, member: approvers.members[0])
             #expect(applied.status == "applied")
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$resourceID == waiting.requireID())
+                .filter(\.$type == .invitationIssued).count() == 1)
             let accepted = try await api(app, .POST, "invitations/accept", token: bea, json: try json(AcceptInvitationDTO(token: token)))
             try requireStatus(accepted, .ok)
             let membership = try await OrganizationUser.query(on: app.db)
@@ -1175,6 +1201,28 @@ extension OpenERPTests {
             let cam = try await signAccessToken(on: app, subject: "cam")
             let tooLate = try await api(app, .POST, "invitations/accept", token: cam, json: try json(AcceptInvitationDTO(token: rejectedToken)))
             try requireStatus(tooLate, .notFound)
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$approvalRequestID == rejectedHeld.id)
+                .filter(\.$resourceType == .invitation).count() == 0)
+            let withdrawnInvite = try await api(app, .POST, "organization-invitations", token: tenant.admin.token,
+                organizationID: orgID, json: try json(CreateInvitationDTO(email: "withdraw@example.com", firstName: "A", lastName: "B", groupId: nil)))
+            let withdrawnHeld = try heldRequest(withdrawnInvite)
+            try await withdraw(app, tenant: tenant, requestID: withdrawnHeld.id, token: tenant.admin.token)
+            #expect(try await BusinessEvent.query(on: app.db).filter(\.$approvalRequestID == withdrawnHeld.id)
+                .filter(\.$resourceType == .invitation).count() == 0)
+
+            // An operator override still preserves tenant and target validation on a held invitation.
+            let failedID = try heldRequest(intoAdmins).id
+            try await admins.delete(on: app.db)
+            let failed = try await ApprovalActions.override(requestID: failedID, organizationID: orgID,
+                reason: "private failure reason", operatorName: "private operator", actorID: nil,
+                context: AuditContext(actorType: .operator, actorName: "private operator"), on: app.db)
+            #expect(failed.status == "failed")
+            let failureEvents = try await BusinessEvent.query(on: app.db).filter(\.$approvalRequestID == failedID).all()
+            #expect(Set(failureEvents.map(\.type)) == [.approvalRequestCreated, .approvalDecisionRecorded, .approvalRequestOverridden, .approvalRequestFailed])
+            #expect(failureEvents.allSatisfy {
+                let body = String(decoding: $0.payload, as: UTF8.self)
+                return !body.contains("private operator") && !body.contains("private failure reason") && !body.contains("dee@acme.com")
+            })
         }
     }
 }
