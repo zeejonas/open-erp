@@ -16,7 +16,7 @@ struct WebhookWorkerCommand: AsyncCommand {
         let app = context.application
         try await checkServingDatabaseRole(on: app.db, environment: app.environment, logger: app.logger)
         let settings = try WebhookWorkerSettings(lookup: Environment.get)
-        let key = try app.webhookEncryptionKey ?? WebhookEncryptionKey.load()
+        let key = try WebhookEncryptionKey.load()
         let transport = WebhookTransport(eventLoopGroup: app.eventLoopGroup, threadPool: app.threadPool)
         let worker = WebhookWorker(database: app.db, logger: app.logger, sender: WebhookSender(settings: settings, key: key),
             transport: { try await transport.send(url: $0, body: $1, headers: $2) })

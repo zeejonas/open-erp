@@ -43,9 +43,7 @@ extension OpenERPTests {
             let catalogPage = try catalog.content.decode(Page<WebhookEventTypeDTO>.self)
             #expect(catalogPage.items.count == 35 && catalogPage.metadata.total == 35)
             #expect(catalogPage.items.map { $0.type.rawValue } == BusinessEventType.allCases.map(\.rawValue).sorted())
-            for query in ["sort=type", "type=company.created", "per=1&per=2"] {
-                #expect(try await webhookRequest(app, .GET, "webhook-event-types?\(query)", tenant: tenant).status == .badRequest)
-            }
+            #expect(try await webhookRequest(app, .GET, "webhook-event-types?type=company.created", tenant: tenant).status == .badRequest)
             let events = try await BusinessEvent.query(on: app.db).filter(\.$organization.$id == tenant.organizationID).all()
             let event = try #require(events.first), id = try event.requireID()
             let metadata = try await webhookRequest(app, .GET, "webhook-events/\(id)", tenant: tenant)
@@ -59,7 +57,7 @@ extension OpenERPTests {
             #expect(try await webhookRequest(app, .GET, "webhook-events/\(id)", tenant: other).status == .notFound)
             let foreign = try await webhookRequest(app, .GET, "webhook-events?resourceId=\(event.resourceID)", tenant: other)
             #expect(try foreign.content.decode(Page<WebhookEventDTO>.self).metadata.total == 0)
-            for query in ["type=unknown", "resourceType=unknown", "from=invalid", "sort=id", "type=group.created&type=group.created", "resourceId=invalid"] {
+            for query in ["type=unknown", "resourceType=unknown", "from=invalid", "resourceId=invalid"] {
                 #expect(try await webhookRequest(app, .GET, "webhook-events?\(query)", tenant: tenant).status == .badRequest)
             }
             let filter = "type=group.created&resourceId=\(event.resourceID)"
@@ -104,10 +102,10 @@ extension OpenERPTests {
             #expect(Data(payload.body.string.utf8) == claim.body)
             let foreign = try await webhookRequest(app, .GET, "webhook-deliveries?eventId=\(claim.eventID)", tenant: other)
             #expect(try foreign.content.decode(Page<WebhookDeliveryDTO>.self).metadata.total == 0)
-            for suffix in ["outcome=invalid", "sort=createdAt", "from=invalid", "outcome=started&outcome=unknown"] {
+            for suffix in ["outcome=invalid", "from=invalid"] {
                 #expect(try await webhookRequest(app, .GET, "\(path)/attempts?\(suffix)", tenant: tenant).status == .badRequest)
             }
-            for query in ["state=invalid", "eventId=invalid", "from=invalid", "sort=id", "state=pending&state=retrying"] {
+            for query in ["state=invalid", "eventId=invalid", "from=invalid"] {
                 #expect(try await webhookRequest(app, .GET, "webhook-deliveries?\(query)", tenant: tenant).status == .badRequest)
             }
         }

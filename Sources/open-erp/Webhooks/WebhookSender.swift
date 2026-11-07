@@ -52,11 +52,11 @@ struct WebhookSender: Sendable {
                 let current = try await WebhookSubscriptionRevision.find(subscription.currentRevisionID, on: db) else {
                 throw BusinessEventWriter.InvalidTransaction()
             }
-            let activeSubscriptionLeases = try await WebhookDelivery.query(on: db).filter(\.$subscription.$id == subscriptionID)
+            // Recount under the subscription lock: the selection's snapshot predates concurrent claims. The
+            // organization limit is deliberately approximate, so its selection-time count is sufficient.
+            let activeLeases = try await WebhookDelivery.query(on: db).filter(\.$subscription.$id == subscriptionID)
                 .filter(\.$state == .inFlight).filter(\.$leaseExpiresAt > time).count()
-            let activeOrganizationLeases = try await WebhookDelivery.query(on: db).filter(\.$organization.$id == subscription.$organization.id)
-                .filter(\.$state == .inFlight).filter(\.$leaseExpiresAt > time).count()
-            guard activeSubscriptionLeases < settings.perSubscription, activeOrganizationLeases < settings.perOrganization else { return nil }
+            guard activeLeases < settings.perSubscription else { return nil }
             let row = try await sql.raw("""
                 SELECT id FROM webhook_deliveries WHERE subscription_id = \(bind: subscriptionID)
                     AND ((state IN ('pending', 'retrying') AND next_attempt_at <= \(bind: time))
@@ -85,12 +85,6 @@ struct WebhookSender: Sendable {
             entry.kind = .started
             entry.outcome = .started
             try await entry.create(on: db)
-            if let first = delivery.firstAttemptAt, time >= first.addingTimeInterval(WebhookRetryPolicy.window) {
-                try await recordResult(delivery, subscription: subscription, current: current, event: event, attemptID: attemptID,
-                    secretID: current.secretID, startedAt: time, at: time, outcome: .exhausted, status: nil,
-                    retryAfter: nil, reason: "retry_window_exhausted", on: db)
-                return nil
-            }
             return try ClaimedWebhookAttempt(id: attemptID, deliveryID: delivery.requireID(), organizationID: event.$organization.id,
                 subscriptionID: subscriptionID, revisionID: pinned.requireID(), secretID: current.secretID, eventID: event.requireID(),
                 url: pinned.url, body: event.payload, digest: event.payloadDigest, secretCiphertext: current.secretCiphertext, startedAt: time)

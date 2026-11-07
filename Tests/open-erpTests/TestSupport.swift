@@ -13,7 +13,6 @@ func withApp<T>(_ test: (Application) async throws -> T) async throws -> T {
 @discardableResult
 func withApp<T>(serving: Bool, _ test: (Application) async throws -> T) async throws -> T {
     let app = try await Application.make(.testing)
-    app.webhookEncryptionKey = try WebhookEncryptionKey(base64: Data(repeating: 17, count: 32).base64EncodedString())
     let result: T
     do {
         try await configure(app, serving: serving)

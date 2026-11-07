@@ -8,7 +8,6 @@ struct WebhookEventTypeDTO: Content, @unchecked Sendable {
     let resourceType: BusinessResourceType
     let sourceReadPermission: String
     let supportsCompanyFilter: Bool
-    let emittingOperation: String
     let summarySchema: SchemaObject
 
     init(_ event: BusinessEventType) {
@@ -17,7 +16,6 @@ struct WebhookEventTypeDTO: Content, @unchecked Sendable {
         resourceType = event.resourceType
         sourceReadPermission = event.sourceReadPermission.rawValue
         supportsCompanyFilter = event.supportsCompanyFilter
-        emittingOperation = event.emittingOperation
         summarySchema = BusinessEventSchemas.summary(event.resourceType)
     }
 }

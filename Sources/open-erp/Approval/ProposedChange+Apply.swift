@@ -165,15 +165,14 @@ extension ProposedChange {
         }
     }
 
-    func apply(on db: any Database, actorID: UUID, organizationID: UUID, webhookKey: WebhookEncryptionKey? = nil) async throws -> ApprovalWriteResult {
+    func apply(on db: any Database, actorID: UUID, organizationID: UUID) async throws -> ApprovalWriteResult {
         switch self {
         case .webhookSubscriptionCreate(let config):
-            let key = try webhookKey ?? WebhookEncryptionKey.load()
-            return ApprovalWriteResult(try await WebhookSubscriptionService.create(config, organizationID: organizationID, actorID: actorID, key: key, on: db))
+            return ApprovalWriteResult(try await WebhookSubscriptionService.create(config, organizationID: organizationID, actorID: actorID, on: db))
         case .webhookSubscriptionUpdate(let id, _, let before, let config, let rotate):
             let (subscription, prior) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
             subscription.currentRevisionID = UUID()
-            let revision = try await WebhookSubscriptionService.append(config, to: subscription, prior: prior, rotate: rotate, actorID: actorID, key: webhookKey, on: db)
+            let revision = try await WebhookSubscriptionService.append(config, to: subscription, prior: prior, rotate: rotate, actorID: actorID, on: db)
             if config.enabled && (!before.enabled || changedFields().contains("enabled")) {
                 subscription.disabledReason = nil
                 subscription.disabledAt = nil
@@ -250,7 +249,7 @@ extension ProposedChange {
             let membershipID = try membership.requireID()
             for groupMembership in try await GroupMember.query(on: db).filter(\.$organizationUser.$id == membershipID).all() {
                 try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)
-            try await groupMembership.emit(.groupMemberDeleted, on: db)
+                try await groupMembership.emit(.groupMemberDeleted, on: db)
             }
             try await membership.softDelete(by: actorID, \.$deletedBy, on: db)
             try await membership.emit(.organizationUserDeleted, on: db)

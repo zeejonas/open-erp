@@ -121,7 +121,7 @@ struct WebhookSubscriptionController: RouteCollection {
     @Sendable func secret(req: Request) async throws -> WebhookSecretDTO {
         try req.require(.webhookSecretRead)
         let id = try subscriptionID(req), organizationID = req.organizationID, actorID = try req.userID(), requestID = req.id
-        let key = try req.application.webhookEncryptionKey ?? WebhookEncryptionKey.load()
+        let key = try WebhookEncryptionKey.load()
         return try await req.db.auditedTransaction(req.auditContext()) { db in
             let (subscription, revision) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
             let secret = try key.decrypt(revision.secretCiphertext, organizationID: organizationID, subscriptionID: subscription.requireID(), secretID: revision.secretID)

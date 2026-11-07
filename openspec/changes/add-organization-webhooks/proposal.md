@@ -9,6 +9,7 @@ Organizations need reliable notifications of committed ERP changes and approval 
 - Run a separate, horizontally scalable `webhook-worker` process from the existing Swift application/image. It fans events out to matching subscriptions, claims committed work with per-process concurrency and pool-wide per-subscription/per-organization limits so capacity grows with replicas, sends Standard Webhooks HMAC-signed HTTPS notifications, retries failures, and records append-only attempt evidence.
 - Automatically pause subscriptions whose endpoint has failed continuously for 72 hours, attributed to the system and visible in health.
 - Expose an event catalog, event and delivery history, integration health, restricted payload inspection, and recorded secret disclosure.
+- Deleting a group now also soft-deletes its role and company links, so each removed relationship has a matching `group_role.deleted` or `group_company.deleted` event instead of persisting under a deleted group.
 - Preserve the distinction between recorded approval decisions, successfully applied changes, endpoint acknowledgments, and downstream processing.
 - **BREAKING (deployment configuration):** API serving and webhook workers require a deployment-provided webhook key-encryption key. Offline OpenAPI export and migration commands remain independent of it.
 

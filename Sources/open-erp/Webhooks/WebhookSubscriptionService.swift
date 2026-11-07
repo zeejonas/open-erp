@@ -55,7 +55,7 @@ enum WebhookSubscriptionService {
         guard required.isSubset(of: permissions) else { throw Abort(.forbidden, reason: "Missing required webhook management, source-read or payload permission") }
     }
 
-    static func create(_ config: WebhookConfiguration, organizationID: UUID, actorID: UUID, key: WebhookEncryptionKey, on db: any Database) async throws -> WebhookSubscriptionDTO {
+    static func create(_ config: WebhookConfiguration, organizationID: UUID, actorID: UUID, on db: any Database) async throws -> WebhookSubscriptionDTO {
         let id = UUID(), revisionID = UUID()
         let now = try await transactionTime(on: db)
         let subscription = WebhookSubscription()
@@ -68,11 +68,11 @@ enum WebhookSubscriptionService {
         try await subscription.create(on: db)
         var config = config
         config.enabled = false
-        let revision = try await append(config, to: subscription, prior: nil, rotate: true, actorID: actorID, key: key, on: db)
+        let revision = try await append(config, to: subscription, prior: nil, rotate: true, actorID: actorID, on: db)
         return try .init(subscription, revision: revision)
     }
 
-    static func append(_ config: WebhookConfiguration, to subscription: WebhookSubscription, prior: WebhookSubscriptionRevision?, rotate: Bool, actorID: UUID, key: WebhookEncryptionKey?, on db: any Database) async throws -> WebhookSubscriptionRevision {
+    static func append(_ config: WebhookConfiguration, to subscription: WebhookSubscription, prior: WebhookSubscriptionRevision?, rotate: Bool, actorID: UUID, on db: any Database) async throws -> WebhookSubscriptionRevision {
         let revision = WebhookSubscriptionRevision()
         revision.id = subscription.currentRevisionID
         revision.$organization.id = subscription.$organization.id
@@ -85,9 +85,8 @@ enum WebhookSubscriptionService {
         revision.schemaVersion = 1
         revision.version = (prior?.version ?? 0) + 1
         if rotate || prior == nil {
-            let key = try key ?? WebhookEncryptionKey.load()
             revision.secretID = UUID()
-            revision.secretCiphertext = try key.encrypt(WebhookSigningSecret(), organizationID: subscription.$organization.id,
+            revision.secretCiphertext = try WebhookEncryptionKey.load().encrypt(WebhookSigningSecret(), organizationID: subscription.$organization.id,
                 subscriptionID: subscription.requireID(), secretID: revision.secretID)
         } else if let prior {
             revision.secretID = prior.secretID

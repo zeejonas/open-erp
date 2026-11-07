@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Public business event catalog
-The system SHALL define a code-owned catalog of public event types at schema version 1. Each entry SHALL declare its resource type, source-read permission, supported company filtering, summary schema, and emitting business operation. The initial catalog SHALL be:
+The system SHALL define a code-owned catalog of public event types at schema version 1. Each entry SHALL declare its resource type, source-read permission, supported company filtering, and summary schema. The initial catalog SHALL be:
 
 | Events | Resource type | Required source read | Summary data |
 |---|---|---|---|

@@ -1,3 +1,5 @@
+@testable import open_erp
+
 /// Each audited table is classified deliberately. Aggregate detail writes publish at the owning
 /// semantic operation; attribution saves and held invitation preparation never publish separately.
 enum BusinessEventClassification {

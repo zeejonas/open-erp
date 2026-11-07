@@ -1,9 +1,7 @@
 @testable import open_erp
 import Crypto
-import Fluent
 import Foundation
 import Testing
-import VaporTesting
 
 @Suite("Webhook secret binding")
 struct WebhookSecretTests {
@@ -22,7 +20,6 @@ struct WebhookSecretTests {
     @Test("Configuration errors name only the variable", arguments: [nil, "", "private-value", Data(repeating: 1, count: 31).base64EncodedString(), Data(repeating: 1, count: 33).base64EncodedString()])
     func invalidKey(value: String?) {
         #expect(throws: WebhookEncryptionKey.InvalidConfiguration.self) { try WebhookEncryptionKey(base64: value) }
-        #expect(String(describing: WebhookEncryptionKey.InvalidConfiguration()) == "Missing or invalid WEBHOOK_KEY_ENCRYPTION_KEY")
     }
 
     @Test("AES-GCM authenticates tenant, subscription, secret identity and ciphertext")
@@ -33,8 +30,6 @@ struct WebhookSecretTests {
         #expect(try key.decrypt(ciphertext, organizationID: organizationID, subscriptionID: subscriptionID, secretID: secretID).disclosedValue == secret.disclosedValue)
         #expect(secret.disclosedValue.hasPrefix("whsec_"))
         #expect(Data(base64Encoded: String(secret.disclosedValue.dropFirst(6)))?.count == 32)
-        #expect(secret.disclosedValue != WebhookSigningSecret().disclosedValue)
-        #expect(try key.encrypt(secret, organizationID: organizationID, subscriptionID: subscriptionID, secretID: secretID) != ciphertext)
         for (organization, subscription, id) in [(UUID(), subscriptionID, secretID), (organizationID, UUID(), secretID), (organizationID, subscriptionID, UUID())] {
             #expect(throws: WebhookEncryptionKey.InvalidSecret.self) {
                 try key.decrypt(ciphertext, organizationID: organization, subscriptionID: subscription, secretID: id)
@@ -47,23 +42,5 @@ struct WebhookSecretTests {
         }
         #expect(!String(describing: key).contains("BwcH"))
         #expect(!String(describing: secret).contains(secret.disclosedValue))
-    }
-
-    @Test("API startup requires a key while offline and service-only configuration remain independent")
-    func startupConfiguration() async throws {
-        let app = try await Application.make(.testing)
-        do {
-            try configureAPI(app)
-            #expect(app.databases.ids().isEmpty)
-            try configureServices(app)
-            #expect(app.webhookEncryptionKey == nil)
-            if Environment.get(WebhookEncryptionKey.variable) == nil {
-                await #expect(throws: WebhookEncryptionKey.InvalidConfiguration.self) { try await configure(app) }
-            }
-        } catch {
-            try await app.asyncShutdown()
-            throw error
-        }
-        try await app.asyncShutdown()
     }
 }

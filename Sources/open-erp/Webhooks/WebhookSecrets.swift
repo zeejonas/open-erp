@@ -65,11 +65,3 @@ enum StandardWebhookSignature {
         return "v1," + Data(digest).base64EncodedString()
     }
 }
-
-private struct WebhookEncryptionKeyStorage: StorageKey { typealias Value = WebhookEncryptionKey }
-extension Application {
-    var webhookEncryptionKey: WebhookEncryptionKey? {
-        get { storage[WebhookEncryptionKeyStorage.self] }
-        set { storage[WebhookEncryptionKeyStorage.self] = newValue }
-    }
-}

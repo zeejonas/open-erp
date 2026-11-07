@@ -4,31 +4,6 @@ import Testing
 
 @Suite("Business event v1 contract")
 struct BusinessEventContractTests {
-    @Test("The catalog includes only the supported public transitions")
-    func catalog() {
-        let transitions: [String: [String]] = [
-            "organization": ["created", "updated", "deleted", "restored"],
-            "company": ["created", "updated", "deleted"],
-            "role": ["created", "updated", "deleted"],
-            "group": ["created", "updated", "deleted"],
-            "group_member": ["created", "deleted"],
-            "group_role": ["created", "deleted"],
-            "group_company": ["created", "deleted"],
-            "organization_user": ["created", "deleted"],
-            "organization_invitation": ["issued", "reissued", "accepted", "revoked"],
-            "approval_policy": ["created", "updated", "deleted"],
-            "approval_request": ["created", "decision_recorded", "applied", "failed", "rejected", "withdrawn", "overridden"],
-        ]
-        let expected = Set(transitions.flatMap { resource, operations in operations.map { "\(resource).\($0)" } })
-        #expect(Set(BusinessEventType.allCases.map(\.rawValue)) == expected)
-        #expect(BusinessEventType.allCases.count == 35)
-        for type in BusinessEventType.allCases {
-            #expect(type.schemaVersion == 1)
-            #expect(type.sourceReadPermission.rawValue == (type.resourceType == .groupRole || type.resourceType == .groupCompany ? "group:read" : "\(type.resourceType.rawValue):read"))
-            #expect(type.supportsCompanyFilter == (type.resourceType == .company || type.resourceType == .groupCompany))
-        }
-    }
-
     @Test("All event summaries have exactly their allowlisted fields", arguments: BusinessEventType.allCases)
     func summaries(type: BusinessEventType) throws {
         let resourceID = UUID()

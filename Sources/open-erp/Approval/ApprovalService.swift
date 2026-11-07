@@ -22,7 +22,6 @@ struct ApprovalService {
                 change,
                 requesterID: requesterID,
                 organizationID: organizationID,
-                webhookKey: request.application.webhookEncryptionKey,
                 on: db
             )
             if let held {
@@ -59,7 +58,6 @@ struct ApprovalService {
             organizationID: organizationID,
             userID: userID,
             context: try request.auditContext(),
-            webhookKey: request.application.webhookEncryptionKey,
             on: request.db
         )
     }
@@ -96,7 +94,6 @@ struct ApprovalService {
             operatorName: nil,
             actorID: userID,
             context: try request.auditContext(),
-            webhookKey: request.application.webhookEncryptionKey,
             on: request.db
         )
     }
@@ -108,7 +105,6 @@ enum ApprovalActions {
         organizationID: UUID,
         userID: UUID,
         context: AuditContext,
-        webhookKey: WebhookEncryptionKey? = nil,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
         do {
@@ -125,7 +121,7 @@ enum ApprovalActions {
                     throw Abort(.forbidden, reason: "Not eligible to approve this request")
                 }
                 if try await pendingTrackCount(approval, on: database) == 0 {
-                    try await applyApproved(approval, decisions: decisions, actorID: userID, webhookKey: webhookKey, on: database)
+                    try await applyApproved(approval, decisions: decisions, actorID: userID, on: database)
                 }
                 return try await approval.detailedDTO(on: database)
             }
@@ -203,7 +199,6 @@ enum ApprovalActions {
         operatorName: String?,
         actorID: UUID?,
         context: AuditContext,
-        webhookKey: WebhookEncryptionKey? = nil,
         on db: any Database
     ) async throws -> GetApprovalRequestDTO {
         let reason = try requiredText(reason, reason: "A reason is required")
@@ -224,7 +219,7 @@ enum ApprovalActions {
                     comment: reason
                 )
                 try await decision.insert(for: approval, on: database)
-                try await applyApproved(approval, decisions: [decision], actorID: actorID, webhookKey: webhookKey, on: database)
+                try await applyApproved(approval, decisions: [decision], actorID: actorID, on: database)
                 return try await approval.detailedDTO(on: database)
             }
         } catch let failure as ApprovalApplyFailure {
@@ -237,7 +232,6 @@ private func submitOrHold(
     _ change: ProposedChange,
     requesterID: UUID,
     organizationID: UUID,
-    webhookKey: WebhookEncryptionKey?,
     on db: any Database
 ) async throws -> (ApprovalWriteResult, GetApprovalRequestDTO?) {
     let companyIDs = try await change.companyContext(on: db)
@@ -247,7 +241,7 @@ private func submitOrHold(
         .all()
     let matches = policies.filter { $0.matches(changedFields: changed, companyIDs: companyIDs) }
     if matches.isEmpty {
-        let result = try await change.apply(on: db, actorID: requesterID, organizationID: organizationID, webhookKey: webhookKey)
+        let result = try await change.apply(on: db, actorID: requesterID, organizationID: organizationID)
         return (result, nil)
     }
 
@@ -447,7 +441,6 @@ private func applyApproved(
     _ approval: ApprovalRequest,
     decisions: [NewDecision],
     actorID: UUID?,
-    webhookKey: WebhookEncryptionKey?,
     on db: any Database
 ) async throws {
     do {
@@ -462,7 +455,7 @@ private func applyApproved(
         }
         try await approval.change.authorizeWebhook(requesterID: requesterID, organizationID: organizationID, on: db)
         try await approval.change.check(on: db, organizationID: organizationID)
-        _ = try await approval.change.apply(on: db, actorID: requesterID, organizationID: organizationID, webhookKey: webhookKey)
+        _ = try await approval.change.apply(on: db, actorID: requesterID, organizationID: organizationID)
         approval.status = ApprovalRequestStatus.applied.rawValue
         try await approval.save(on: db)
         try await approval.emit(.approvalRequestApplied, on: db)

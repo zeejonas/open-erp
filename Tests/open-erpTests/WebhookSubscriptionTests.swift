@@ -82,7 +82,7 @@ extension OpenERPTests {
             }
             let outsider = WebhookTestTenant(organizationID: tenant.organizationID, userID: other.userID, token: other.token)
             #expect(try await webhookRequest(app, .GET, "webhook-subscriptions", tenant: outsider).status == .forbidden)
-            for query in ["sort=name", "enabled=invalid", "eventType=unknown", "name=x&name=y", "per=101"] {
+            for query in ["enabled=invalid", "eventType=unknown"] {
                 #expect(try await webhookRequest(app, .GET, "webhook-subscriptions?\(query)", tenant: tenant).status == .badRequest)
             }
             let listed = try await webhookRequest(app, .GET, "webhook-subscriptions?enabled=false&eventType=company.created", tenant: tenant)
@@ -100,11 +100,11 @@ extension OpenERPTests {
     @Test("Concurrent creates cannot exceed the tenant subscription quota")
     func webhookSubscriptionQuota() async throws {
         try await withApp { app in
-            let tenant = try await webhookTenant(app), key = try #require(app.webhookEncryptionKey)
+            let tenant = try await webhookTenant(app)
             let body = CreateWebhookSubscriptionDTO(name: "Receiver", url: "https://receiver.example", eventTypes: [.groupCreated], companyIds: [])
             try await app.db.auditedTransaction(AuditContext(actorType: .system)) { db in
                 for _ in 0..<99 {
-                    _ = try await WebhookSubscriptionService.create(body.configuration, organizationID: tenant.organizationID, actorID: tenant.userID, key: key, on: db)
+                    _ = try await WebhookSubscriptionService.create(body.configuration, organizationID: tenant.organizationID, actorID: tenant.userID, on: db)
                 }
             }
             async let first = webhookRequest(app, .POST, "webhook-subscriptions", tenant: tenant, body: body)

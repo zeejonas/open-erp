@@ -40,9 +40,9 @@ enum WebhookRetryPolicy {
         return .exhausted
     }
 
+    /// Returns nil once the next attempt would fall at or past the window, so every scheduled attempt is sent.
     static func nextAttempt(count: Int, firstAttempt: Date, now: Date, status: Int?, retryAfter: String?, jitter: Double) -> Date? {
         let deadline = firstAttempt.addingTimeInterval(window)
-        guard now < deadline else { return nil }
         let cap = min(21_600, 5 * pow(2, Double(min(max(count - 1, 0), 13))))
         var delay = cap * min(max(jitter, 0), 1)
         if status == 429 || status == 503, let retryAfter {
@@ -58,6 +58,7 @@ enum WebhookRetryPolicy {
             }
             if let seconds, seconds.isFinite, seconds > 0 { delay = max(delay, seconds) }
         }
-        return min(now.addingTimeInterval(delay), deadline)
+        let next = now.addingTimeInterval(delay)
+        return next < deadline ? next : nil
     }
 }

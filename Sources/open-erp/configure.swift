@@ -10,7 +10,7 @@ func configure(_ app: Application, serving: Bool = true) async throws {
     if serving {
         app.storage[TrustedProxyCount.self] = try TrustedProxyCount.parse(Environment.get("TRUSTED_PROXY_COUNT"))
         try await checkServingDatabaseRole(on: app.db, environment: app.environment, logger: app.logger)
-        app.webhookEncryptionKey = try app.webhookEncryptionKey ?? WebhookEncryptionKey.load()
+        _ = try WebhookEncryptionKey.load() // Fail at startup rather than on first secret use.
         try await configureAuthentication(app)
     }
 }

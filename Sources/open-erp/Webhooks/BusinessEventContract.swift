@@ -46,23 +46,6 @@ enum BusinessEventType: String, Codable, CaseIterable, Sendable {
     var schemaVersion: Int { 1 }
     var sourceReadPermission: Permission { resourceType.sourceReadPermission }
     var supportsCompanyFilter: Bool { resourceType == .company || resourceType == .groupCompany }
-
-    /// Semantic operation names for catalog discovery; storage callbacks are not producers.
-    var emittingOperation: String {
-        switch self {
-        case .organizationCreated: "PlatformController.provision"
-        case .organizationRestored: "PlatformController.restore"
-        case .organizationUserCreated: "InvitationController.accept"
-        case .groupMemberCreated: "ProposedChange.apply / InvitationController.accept"
-        case .invitationIssued: "ProposedChange.apply / PlatformController.provision"
-        case .invitationReissued: "PlatformController.reissue"
-        case .invitationAccepted: "InvitationController.accept"
-        case .approvalRequestCreated: "ApprovalService.submit"
-        case .approvalDecisionRecorded, .approvalRequestApplied, .approvalRequestFailed,
-             .approvalRequestRejected, .approvalRequestWithdrawn, .approvalRequestOverridden: "ApprovalActions"
-        default: "ProposedChange.apply: \(rawValue)"
-        }
-    }
 }
 
 enum BusinessResourceType: String, Codable, CaseIterable, Sendable {
