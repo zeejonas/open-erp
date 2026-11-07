@@ -23,6 +23,11 @@ x-shared_environment: &shared_environment
   DATABASE_HOST: db
   DATABASE_TLS_MODE: disable
   DATABASE_NAME: &db_name vapor_database
+  WEBHOOK_KEY_ENCRYPTION_KEY: ${WEBHOOK_KEY_ENCRYPTION_KEY:-}
+  WEBHOOK_WORKER_CONCURRENCY: ${WEBHOOK_WORKER_CONCURRENCY:-16}
+  WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION: ${WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION:-8}
+  WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION: ${WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION:-4}
+  WEBHOOK_POLL_INTERVAL_MS: ${WEBHOOK_POLL_INTERVAL_MS:-1000}
   
 services:
   app:
@@ -59,6 +64,20 @@ services:
     command: ["migrate", "--yes"]
     deploy:
       replicas: 0
+  webhook-worker:
+    image: open-erp:latest
+    build:
+      context: .
+    init: true
+    environment:
+      <<: *shared_environment
+      DATABASE_USERNAME: open_erp_runtime
+      DATABASE_PASSWORD: open_erp_runtime_local
+    depends_on:
+      db:
+        condition: service_healthy
+    stop_grace_period: 30s
+    command: ["webhook-worker", "--env", "production"]
   revert:
     image: open-erp:latest
     build:

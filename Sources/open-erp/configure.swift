@@ -10,6 +10,7 @@ func configure(_ app: Application, serving: Bool = true) async throws {
     if serving {
         app.storage[TrustedProxyCount.self] = try TrustedProxyCount.parse(Environment.get("TRUSTED_PROXY_COUNT"))
         try await checkServingDatabaseRole(on: app.db, environment: app.environment, logger: app.logger)
+        app.webhookEncryptionKey = try app.webhookEncryptionKey ?? WebhookEncryptionKey.load()
         try await configureAuthentication(app)
     }
 }
@@ -59,9 +60,18 @@ func configureServices(_ app: Application) throws {
     app.migrations.add(CreateApprovalRequestTrack())
     app.migrations.add(CreateApprovalDecision())
     app.migrations.add(CreateOrganizationInvitation())
+    app.migrations.add(CreateBusinessEventStream())
+    app.migrations.add(CreateBusinessEvent())
+    app.migrations.add(CreateBusinessEventDispatch())
+    app.migrations.add(CreateWebhookSubscription())
+    app.migrations.add(CreateWebhookSubscriptionRevision())
+    app.migrations.add(CreateWebhookSecretReveal())
+    app.migrations.add(CreateWebhookDelivery())
+    app.migrations.add(CreateWebhookDeliveryEntry())
 
     app.asyncCommands.use(PruneRevokedTokensCommand(), as: "prune-revoked-tokens")
     app.asyncCommands.use(PlatformAdminCommand(), as: "platform-admin")
     app.asyncCommands.use(ApprovalOverrideCommand(), as: "approval-override")
     app.asyncCommands.use(AuditVerifyCommand(), as: "audit-verify")
+    app.asyncCommands.use(WebhookWorkerCommand(), as: "webhook-worker")
 }

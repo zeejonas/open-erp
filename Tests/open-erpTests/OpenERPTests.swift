@@ -65,6 +65,7 @@ struct OpenERPTests {
                 .first()
             #expect(eligibility?.deletedAt != nil)
             #expect(eligibility?.$deletedBy.id == userID)
+            try await expectProducedEvents([.companyCreated, .companyDeleted], on: app.db)
         }
     }
 
@@ -252,6 +253,7 @@ struct OpenERPTests {
                 .all()
             #expect(memberships.count == 2)
             #expect(memberships.contains { $0.$deletedBy.id == adminID })
+            try await expectProducedEvents(.memberRemoval, on: app.db)
         }
     }
 }

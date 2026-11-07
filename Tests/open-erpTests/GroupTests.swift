@@ -259,6 +259,7 @@ extension OpenERPTests {
             }, afterResponse: { res async in
                 #expect(res.status == .noContent)
             })
+            try await expectProducedEvents([.groupCreated, .groupDeleted], on: app.db)
         }
     }
 
@@ -364,6 +365,7 @@ extension OpenERPTests {
                 .all()
             #expect(rewritten.count == 2)
             #expect(rewritten.contains { $0.deletedAt == nil })
+            try await expectProducedEvents(.groupMembership, on: app.db)
         }
     }
 
@@ -550,6 +552,7 @@ extension OpenERPTests {
                 .withDeleted()
                 .first()
             #expect(detached?.$deletedBy.id == adminID)
+            try await expectProducedEvents(.assignments, on: app.db)
         }
     }
 }

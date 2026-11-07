@@ -18,12 +18,12 @@ The worker SHALL read these optional settings, each a positive integer:
 
 | Variable | Default |
 |---|---|
-| `WEBHOOK_MAX_IN_FLIGHT` | 32 |
+| `WEBHOOK_WORKER_CONCURRENCY` | 16 |
 | `WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION` | 8 |
 | `WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION` | 4 |
 | `WEBHOOK_POLL_INTERVAL_MS` | 1000 |
 
-Startup SHALL fail, naming the variable, when a value is malformed or when the per-subscription limit exceeds the per-organization limit or the per-organization limit exceeds the global limit. Limits SHALL be enforced by database lease state and short admission locks across all worker processes, not by per-process counters; every worker process SHALL use the same values.
+Startup SHALL fail, naming the variable, when a value is malformed or when the per-subscription limit exceeds the per-organization limit. Worker concurrency SHALL apply per process; the per-organization and per-subscription limits SHALL be enforced from database lease state across processes as defined by webhook-delivery, and every worker process SHALL use the same values for them.
 
 #### Scenario: Missing encryption key
 - **WHEN** API serving or a worker starts without the webhook encryption key

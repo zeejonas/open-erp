@@ -13,14 +13,18 @@ func auditCoverageProblems(on database: any Database) async throws -> [String] {
         problems.append("audit.audit_events is missing")
     }
 
-    // 29 is the catalog bit mask for an AFTER INSERT OR UPDATE OR DELETE row trigger.
+    // AFTER ROW: INSERT/UPDATE/DELETE = 29, INSERT/DELETE = 13.
     let tables = try await sql.raw("""
         SELECT relation.relname::text AS name,
+            (SELECT count(*) FROM pg_catalog.pg_trigger AS trigger
+                WHERE trigger.tgrelid = relation.oid
+                    AND trigger.tgfoid = pg_catalog.to_regprocedure('audit.capture_change()')
+            ) AS capture_count,
             EXISTS (
                 SELECT FROM pg_catalog.pg_trigger AS trigger
                 WHERE trigger.tgrelid = relation.oid
                     AND trigger.tgfoid = pg_catalog.to_regprocedure('audit.capture_change()')
-                    AND trigger.tgtype = 29
+                    AND trigger.tgtype = CASE WHEN relation.relname = 'webhook_deliveries' THEN 13 ELSE 29 END
                     AND trigger.tgenabled IN ('O', 'A')
                     AND trigger.tgqual IS NULL
                     AND trigger.tgattr::text = ''
@@ -41,8 +45,12 @@ func auditCoverageProblems(on database: any Database) async throws -> [String] {
 
     for row in tables {
         let table = try row.decode(column: "name", as: String.self)
-        if try !row.decode(column: "captured", as: Bool.self) {
-            problems.append("public.\(table) lacks an enabled audit change trigger")
+        let count = try row.decode(column: "capture_count", as: Int.self)
+        let captured = try row.decode(column: "captured", as: Bool.self)
+        if table == "business_event_dispatches" {
+            if count != 0 { problems.append("public.\(table) must not have an audit change trigger") }
+        } else if count != 1 || !captured {
+            problems.append("public.\(table) lacks an enabled audit change trigger with exactly the required operations")
         }
         if !globalAuditTables.contains(table), try !row.decode(column: "tenant_scoped", as: Bool.self) {
             problems.append("public.\(table) lacks a required organization_id and is unclassified")

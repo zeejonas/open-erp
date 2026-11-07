@@ -107,16 +107,19 @@ final class AccessGroup: Model, @unchecked Sendable {
                 createdByID: createdByID
             )
             try await group.save(on: db)
+            try await group.emit(.groupCreated, on: db)
             for roleKey in template.roleKeys {
                 guard let role = rolesByKey[roleKey] else {
                     throw Abort(.internalServerError, reason: "Role template \(roleKey) was not copied")
                 }
-                try await GroupRole(
+                let link = GroupRole(
                     organizationID: organizationID,
                     groupID: try group.requireID(),
                     roleID: try role.requireID(),
                     createdByID: createdByID
-                ).save(on: db)
+                )
+                try await link.save(on: db)
+                try await link.emit(.groupRoleCreated, on: db)
             }
             created.append(group)
         }

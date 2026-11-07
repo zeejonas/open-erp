@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Durable dispatch and deliveries
-Event capture SHALL save one dispatch record per event atomically with the event, without reading subscriptions or creating deliveries in the business transaction. The worker dispatcher SHALL claim dispatch records with `SKIP LOCKED` and, in one transaction, create deliveries and delete the dispatch record. For each non-deleted, not-disabled subscription in the event's organization, it SHALL select the latest revision whose `createdAt` is at or before the event's `occurredAt` and create one delivery pinned to that revision only if the revision is enabled and its scopes cover the event. `occurredAt` and revision `createdAt` SHALL use the database transaction timestamp. Delivery uniqueness on organization, event and subscription SHALL be enforced in the database, so re-dispatch is idempotent. All event, revision, dispatch, delivery and ledger references SHALL enforce same-organization ownership. No worker SHALL consume uncommitted work. Pending work SHALL survive API/worker restart, and a stopped worker SHALL not make otherwise-valid business writes fail.
+Event capture SHALL save one dispatch record per event atomically with the event, without reading subscriptions or creating deliveries in the business transaction. The worker dispatcher SHALL claim dispatch records with `SKIP LOCKED` and, in one transaction, create deliveries and delete the dispatch record. For each non-deleted, not-disabled subscription in the event's organization, it SHALL select the highest configuration version visible in the event's captured database snapshot and create one delivery pinned to that revision only if the revision is enabled and its scopes cover the event. `occurredAt` and revision `createdAt` SHALL use the database transaction timestamp for evidence, not eligibility. The event SHALL retain its capture snapshot, and revisions SHALL retain their top-level transaction ID and a monotonic configuration version allocated under the subscription lock. Eligibility SHALL require that the revision transaction was committed before the event snapshot, or belongs to the same transaction and has an earlier internal capture order. Snapshot and ordering metadata SHALL not be public. Delivery uniqueness on organization, event and subscription SHALL be enforced in the database, so re-dispatch is idempotent. All event, revision, dispatch, delivery and ledger references SHALL enforce same-organization ownership. No worker SHALL consume uncommitted work. Pending work SHALL survive API/worker restart, and a stopped worker SHALL not make otherwise-valid business writes fail.
 
 #### Scenario: Worker offline
 - **WHEN** an API operation commits while no worker is running
@@ -10,6 +10,14 @@ Event capture SHALL save one dispatch record per event atomically with the event
 #### Scenario: No retrospective delivery
 - **WHEN** a subscription is enabled, or its scope widened, after an event occurred
 - **THEN** dispatch does not create a delivery for that event to that subscription
+
+#### Scenario: Enablement transaction started before the event but committed afterward
+- **WHEN** an enablement transaction starts, an event is captured and commits while enablement remains uncommitted, and enablement then commits before dispatch
+- **THEN** its earlier transaction timestamp does not make that revision eligible for the event
+
+#### Scenario: Configuration timestamps decrease under contention
+- **WHEN** an early-started edit waits for a later-started edit to commit and then applies a higher configuration version
+- **THEN** events captured afterward use the highest visible configuration version, regardless of timestamp order
 
 #### Scenario: Disabled before dispatch
 - **WHEN** a subscription is disabled after an event commits but before it is dispatched
@@ -26,7 +34,7 @@ Event capture SHALL save one dispatch record per event atomically with the event
 ### Requirement: Separate bounded delivery worker
 `webhook-worker` SHALL continuously claim due deliveries using short database transactions, expiring leases and owner tokens. It SHALL append an attempt-start entry before HTTP I/O, send outside database transactions and update mutable scheduling state only while holding the same lease token. The HTTP deadline SHALL be 10 seconds and the lease 60 seconds. Recovery SHALL append an unknown result for an expired started attempt before retrying; a stale worker SHALL not overwrite a replacement owner's result. A request SHALL not be marked acknowledged before a received 2xx response. Shutdown SHALL stop claiming and bound in-flight completion/cancellation.
 
-The worker pool SHALL enforce configured global, per-organization and per-subscription in-flight lease limits across all processes, serialized in Postgres with short locks and released on completion/expiry. Unhealthy subscriptions SHALL not monopolize claims or starve another organization with due work. Workers SHALL not require one process per organization. Claim and dispatch queries SHALL use partial indexes over unfinished work so their cost does not grow with retained history.
+Each worker process SHALL bound its own in-flight attempts by its configured concurrency, so pool capacity grows with replicas. The per-subscription in-flight limit SHALL be exact across all processes, enforced by counting unexpired leases while holding the subscription row lock taken by the claim. The per-organization limit SHALL be enforced across processes by counting unexpired leases without an organization-wide lock and MAY be exceeded briefly by concurrent claims. Claims SHALL not take a pool-wide lock. Leases SHALL release capacity on completion/expiry. Unhealthy subscriptions SHALL not monopolize claims or starve another organization with due work. Workers SHALL not require one process per organization. Claim and dispatch queries SHALL use partial indexes over unfinished work so their cost does not grow with retained history.
 
 #### Scenario: Two workers compete
 - **WHEN** two workers claim the same due delivery concurrently
@@ -40,9 +48,17 @@ The worker pool SHALL enforce configured global, per-organization and per-subscr
 - **WHEN** an expired worker completes after a new owner claims the delivery
 - **THEN** its stale token cannot change the new owner's scheduling state or terminal result
 
-#### Scenario: Shared limits survive scaling
-- **WHEN** several worker processes serve organizations with an unavailable endpoint
-- **THEN** pool-wide limits remain enforced and another organization's due work can proceed
+#### Scenario: Subscription limit survives scaling
+- **WHEN** several worker processes claim work for one subscription concurrently
+- **THEN** its in-flight attempts never exceed the per-subscription limit
+
+#### Scenario: Unhealthy endpoint isolated
+- **WHEN** one organization's endpoint is unavailable and another organization has due work
+- **THEN** the other organization's deliveries proceed
+
+#### Scenario: Capacity grows with replicas
+- **WHEN** a second worker process starts against a backlog across many subscriptions
+- **THEN** total in-flight attempts can exceed one process's concurrency
 
 ### Requirement: Signed stable delivery bodies
 Business notifications SHALL use POST with the exact retained JSON bytes and Standard Webhooks `v1` HMAC-SHA256 signatures: `webhook-id` equal to event ID, a fresh Unix-seconds `webhook-timestamp`, `webhook-signature` of the form `v1,<base64>`, and a distinct `X-OpenERP-Attempt-ID`. The signature input SHALL be `webhook-id.webhook-timestamp.raw-body`, keyed by the subscription's current secret at attempt time. Automatic retries SHALL preserve event identity and body bytes, while timestamps, attempt IDs and the current secret can change. Documentation SHALL instruct receivers to verify the signature and timestamp freshness and deduplicate event IDs atomically with business effects for the retry horizon. Delivery SHALL make no ordering or exactly-once external-processing guarantee.
@@ -112,7 +128,7 @@ Each attempt SHALL have an immutable started ledger entry and at most one immuta
 | `/webhook-deliveries` | `subscriptionId`, `eventId`, `state` | Inclusive `from`, `to` on delivery `createdAt` |
 | `/webhook-deliveries/:id/attempts` | `outcome` (`started`, `acknowledged`, `retryable`, `exhausted`, `unknown`) | Inclusive `from`, `to` on start `createdAt` |
 
-Attempts SHALL be logical start/result pairs identified by attempt ID, ordered by their immutable start timestamp; an unfinished pair SHALL show started. Delivery metadata SHALL include its cancellation reason when cancelled. Metadata SHALL omit business bodies and sensitive values. Health SHALL be a single resource containing counts by state, oldest queued timestamp, last acknowledgment/failure timestamps, `failingSince`, disabled reason and `needsAttention`; it SHALL flag queued work older than five minutes, an exhausted delivery since the last acknowledgment, or an auto-paused subscription. Logs SHALL emit bounded warnings for exhaustion, auto-pause, unsafe destinations and excessive queue or dispatch age without exposing payloads/credentials. `GET /webhook-deliveries/:id/payload` SHALL additionally require `webhook_payload:read` and the event's source-read permission.
+Attempts SHALL be logical start/result pairs identified by attempt ID, ordered by their immutable start timestamp; an unfinished pair SHALL show started. Delivery metadata SHALL include its cancellation reason when cancelled. Metadata SHALL omit business bodies and sensitive values. Health SHALL be a single resource containing counts by state, oldest queued timestamp, last acknowledgment/failure timestamps, median attempt duration over the last 24 hours, `failingSince`, disabled reason and `needsAttention`; it SHALL flag queued work older than five minutes, an exhausted delivery since the last acknowledgment, or an auto-paused subscription. Logs SHALL emit bounded warnings for exhaustion, auto-pause, unsafe destinations and excessive queue or dispatch age without exposing payloads/credentials. Each worker SHALL log a summary every 60 seconds with its in-flight count, oldest undispatched event age, oldest due delivery age and median/maximum claim-transaction duration. `GET /webhook-deliveries/:id/payload` SHALL additionally require `webhook_payload:read` and the event's source-read permission.
 
 #### Scenario: Delivery tenant isolation
 - **WHEN** an organization A member filters deliveries by organization B's event

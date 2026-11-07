@@ -20,6 +20,7 @@ let package = Package(
         .package(url: "https://github.com/vapor/jwt.git", from: "5.0.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/vapor/sql-kit.git", from: "3.0.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", exact: "1.36.2"),
     ],
     targets: [
         .executableTarget(
@@ -34,6 +35,7 @@ let package = Package(
                 .product(name: "JWT", package: "jwt"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "SQLKit", package: "sql-kit"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
             ],
             swiftSettings: swiftSettings
         ),
@@ -46,6 +48,7 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "SQLKit", package: "sql-kit"),
             ],
+            resources: [.copy("Fixtures/Webhooks")],
             swiftSettings: swiftSettings
         )
     ]

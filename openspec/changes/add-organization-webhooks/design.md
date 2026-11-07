@@ -28,7 +28,9 @@ Rejected: route-response publication, which misses CLI writes and misrepresents 
 
 The business transaction writes exactly two rows beyond its own changes: the immutable event and one `business_event_dispatches` row referencing it. It does not read subscriptions or create deliveries, so write latency and lock footprint do not grow with an organization's subscriber count. Any failure rolls back the whole operation.
 
-A dispatcher loop in `webhook-worker` claims dispatch rows with `FOR UPDATE SKIP LOCKED` in bounded batches. For each event it selects, per non-deleted subscription in the organization, the latest revision whose `createdAt` is at or before the event's `occurredAt`. If that revision is enabled and its event/company scopes cover the event, and the subscription is not currently disabled, it inserts one delivery pinned to that revision. It then deletes the dispatch row in the same transaction. Matching against the revision in effect when the event occurred means a subscription enabled or widened later never receives earlier events. `occurredAt` and revision `createdAt` both use the database transaction timestamp. A uniqueness constraint on `(organization_id, event_id, subscription_id)` makes a re-run dispatch idempotent.
+A dispatcher loop in `webhook-worker` claims dispatch rows with `FOR UPDATE SKIP LOCKED` in bounded batches. For each event it selects, per non-deleted subscription in the organization, the highest monotonic configuration version visible in the event's captured database snapshot. If that revision is enabled and its event/company scopes cover the event, and the subscription is not currently disabled, it inserts one delivery pinned to that revision. It then deletes the dispatch row in the same transaction. Matching against committed visibility at event capture means a subscription enabled or widened later never receives earlier events. Store `pg_current_snapshot()` with the event and the top-level transaction ID with each revision; select only revisions whose transaction is visible via `pg_visible_in_snapshot`. A revision from the event's own transaction is eligible only when its internal capture order precedes the event. A database sequence supplies that intra-transaction order without serializing commits; gaps are permitted and the order is never public. Allocate a monotonic configuration version under the subscription lock and use it to select the latest eligible revision. `occurredAt` and revision `createdAt` still use database transaction timestamps for evidence, but timestamps do not determine eligibility.
+
+A two-connection [Postgres demo](demos/transaction-timestamp-race.py) proved timestamp-only matching selects an uncommitted revision once it later commits (`timestamp_only_matches=true`, `revision_visible_when_event_captured=false`). Transaction timestamps reflect transaction start, and even configuration timestamps can decrease when a transaction starts early and waits for a subscription lock. [Postgres snapshot functions](https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-PG-SNAPSHOT) provide retained visibility independent of worker lag; commit timestamps are unsuitable because vacuum removes them. Snapshot and capture-order metadata remain internal and are omitted from payloads and metadata APIs. A uniqueness constraint on `(organization_id, event_id, subscription_id)` makes a re-run dispatch idempotent.
 
 ```text
 API or command                  Postgres                       webhook-worker
@@ -57,7 +59,7 @@ Workers poll with a configurable interval (default 1 s) against partial indexes,
 
 All IDs are UUIDs. Use required `organization_id`, composite tenant foreign keys, and database constraints on matching event/subscription/revision ownership. Evidence tables reject update/delete/truncate through the existing append-only mechanism. Resource revisions count emitted events, not every audit row. Lock/initialize the stream row and allocate its revision in the transaction. `changedFields` contains public business field names, not audit metadata columns.
 
-Audit capture is scoped to evidence, not queue churn. `webhook_deliveries` scheduling updates (lease, state, next attempt, count) happen several times per attempt and are fully reconstructable from the append-only ledger, so its audit trigger captures only `INSERT` and `DELETE`. `business_event_dispatches` holds only an event reference and is created/deleted once per event; it is exempt from row capture, and the event it references is itself audited on insert. Every other new table keeps full trigger coverage. Delivery-history indexes are partial on `(next_attempt_at)` for `pending`/`retrying` rows so claim cost does not grow with retained history. Partitioning or archiving terminal deliveries is a later, separately proposed change.
+Audit capture is scoped to evidence, not queue churn. `webhook_deliveries` scheduling updates (lease, state, next attempt, count) happen several times per attempt and are fully reconstructable from the append-only ledger, so its audit trigger captures only `INSERT` and `DELETE`. `business_event_dispatches` holds only an event reference and is created/deleted once per event; it is exempt from row capture, and the event it references is itself audited on insert. Every other new table keeps full trigger coverage. Delivery-history indexes are partial on `(next_attempt_at)` for `pending`/`retrying` rows so claim cost does not grow with retained history. Partitioning or archiving terminal deliveries is deferred (see Deferred Scope).
 
 Framework basis: [Fluent schemas](https://docs.vapor.codes/fluent/schema/) for models, unique constraints and migration structure; existing tenant-FK helpers for compound references; SQLKit for Postgres locking. [Postgres documents `SKIP LOCKED` for queue-like workloads](https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE) and [partial indexes](https://www.postgresql.org/docs/current/indexes-partial.html) for indexing a hot subset.
 
@@ -102,7 +104,7 @@ A shared secret must be retrievable by the sender and disclosed to the customer,
 
 Trade-off: unlike Ed25519 public keys, the platform holds a secret that can forge signatures, and disclosure needs its own control. That is accepted for receiver compatibility; the reveal ledger and immediate rotation are the compensating controls.
 
-Require HTTPS on port 443, a valid hostname, no URL credentials, query, or fragment, and no redirects. Validate syntax on subscription writes and revalidate DNS destinations at each attempt. Block non-public IPv4/IPv6 addresses and cloud metadata ranges. The transport connects only to vetted addresses while retaining hostname TLS verification/SNI, using AsyncHTTPClient 1.36.2's documented `HTTPClient.Configuration.dnsOverride`. Use a bounded per-attempt client sharing event loops and shut it down after completion. This forgoes connection reuse (a TLS handshake per attempt); a short-lived client cache keyed by host and vetted address is a later optimization that must keep per-attempt revalidation. Declare the existing transitive package as a direct target dependency. A targeted TLS/transport test must verify the configuration before implementation is considered complete. Do not forward inbound authorization or cookies, or store response bodies/headers.
+Require HTTPS on port 443, a valid hostname, no URL credentials, query, or fragment, and no redirects. Validate syntax on subscription writes and revalidate DNS destinations at each attempt. Block non-public IPv4/IPv6 addresses and cloud metadata ranges. The transport connects only to vetted addresses while retaining hostname TLS verification/SNI, using AsyncHTTPClient 1.36.2's documented `HTTPClient.Configuration.dnsOverride`. Use a bounded per-attempt client sharing event loops and shut it down after completion. This forgoes connection reuse (a TLS handshake per attempt); connection reuse is deferred (see Deferred Scope). Declare the existing transitive package as a direct target dependency. A targeted TLS/transport test must verify the configuration before implementation is considered complete. Do not forward inbound authorization or cookies, or store response bodies/headers.
 
 Framework/API basis: [Vapor client configuration](https://docs.vapor.codes/basics/client/#configuration), [AsyncHTTPClient API](https://swiftpackageindex.com/swift-server/async-http-client/documentation/asynchttpclient) and its [locked dnsOverride documentation](https://github.com/swift-server/async-http-client/blob/1.36.2/Sources/AsyncHTTPClient/HTTPClient.swift), [Swift Crypto](https://github.com/apple/swift-crypto) `HMAC<SHA256>` and `AES.GCM`, [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md), and [OWASP SSRF guidance](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
 
@@ -116,20 +118,22 @@ Claim due deliveries with `FOR UPDATE SKIP LOCKED`, assign a random lease token 
 
 Treat 2xx as `acknowledged`, not processed. Retry network failures, timeouts, 408, 425, 429 and 5xx; other statuses are terminal `exhausted`. Do not follow 3xx. Use full-jitter exponential delay starting at 5 seconds, capped at 6 hours, over a 72-hour window from the first authorized attempt. Honor a valid `Retry-After` for 429/503 without exceeding the window. Worker downtime before a first attempt does not consume the window. Cancellation of queued work appends a cancellation ledger entry with a bounded reason code.
 
-In-flight limits are deployment configuration, enforced pool-wide by counting valid leases in Postgres:
+Concurrency limits are deployment configuration:
 
-| Variable | Default |
-|---|---|
-| `WEBHOOK_MAX_IN_FLIGHT` | 32 |
-| `WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION` | 8 |
-| `WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION` | 4 |
-| `WEBHOOK_POLL_INTERVAL_MS` | 1000 |
+| Variable | Default | Scope and enforcement |
+|---|---|---|
+| `WEBHOOK_WORKER_CONCURRENCY` | 16 | In-flight attempts per worker process; bounded in memory by the worker's task group |
+| `WEBHOOK_MAX_IN_FLIGHT_PER_SUBSCRIPTION` | 4 | Exact, pool-wide; counted under the subscription row lock the claim already takes |
+| `WEBHOOK_MAX_IN_FLIGHT_PER_ORGANIZATION` | 8 | Approximate, pool-wide; counted without a lock, so concurrent claims can briefly overshoot |
+| `WEBHOOK_POLL_INTERVAL_MS` | 1000 | Idle poll interval for both loops |
 
-Startup fails unless per-subscription ≤ per-organization ≤ global. Delivery promises no ordering, so per-subscription concurrency above 1 costs nothing semantically. Brief claim transactions take a worker-only advisory lock, lock the subscription, then claim its due delivery with `SKIP LOCKED`. Disable paths lock subscription before delivery as well, avoiding lock inversion with business transactions. Rotate organization selection to avoid starving other tenants and measure pending age. Pool throughput is roughly global limit ÷ endpoint latency; a load demo establishes the real ceiling before release.
+Startup fails unless per-subscription ≤ per-organization. Total pool capacity is replicas × `WEBHOOK_WORKER_CONCURRENCY`, so adding workers adds throughput; the replica count is the outbound cap. A claim transaction locks one subscription with due work using `SKIP LOCKED`, counts that subscription's and its organization's unexpired leases, and claims one due delivery if both have a free slot. No advisory lock is taken, so claims for different subscriptions never wait on each other. The organization limit exists for tenant fairness, where a request or two of overshoot is harmless; the subscription limit protects a customer endpoint, so it is exact. Disable paths lock subscription before delivery as well, avoiding lock inversion with business transactions. Rotate organization selection to avoid starving other tenants. Delivery promises no ordering, so per-subscription concurrency above 1 costs nothing semantically. Per-subscription throughput is roughly its limit ÷ endpoint latency (about 20/s at 200 ms with defaults); a load demo confirms this before release.
 
-Framework basis: [Vapor AsyncCommand](https://docs.vapor.codes/advanced/commands/#custom-commands), [Vapor environment](https://docs.vapor.codes/basics/environment/) for configuration, and [Postgres row/advisory locks](https://www.postgresql.org/docs/current/explicit-locking.html).
+The worker logs a bounded summary every 60 seconds: in-flight count, dispatch lag (oldest undispatched event age), oldest due delivery age, and claim-transaction duration (median and maximum). Subscription health adds median attempt duration over the last 24 hours. These are the signals that trigger the deferred scaling work below.
 
-Rejected: in-process-only delivery, which couples capacity and failure domains to serving; per-process counters, which break when workers scale; fixed compiled-in limits, which cap throughput regardless of replicas.
+Framework basis: [Vapor AsyncCommand](https://docs.vapor.codes/advanced/commands/#custom-commands), [Vapor environment](https://docs.vapor.codes/basics/environment/) for configuration, and [Postgres row locks](https://www.postgresql.org/docs/current/explicit-locking.html).
+
+Rejected: in-process-only delivery, which couples capacity and failure domains to serving; a pool-wide limit serialized by one advisory lock, which caps throughput regardless of replicas; an exact organization limit, which needs an organization-wide lock for a fairness goal that tolerates overshoot; fixed compiled-in limits.
 
 ### 7. Persistently failing endpoints are paused automatically
 
@@ -154,7 +158,16 @@ Each item below is valuable but separable, and is left to a follow-up change so 
 - `GET /webhook-events/:id/evidence` cross-table evidence aggregation.
 - `webhook-verify` coverage reconciliation of audit transactions against events, events against deliveries, and abandoned attempts.
 - Graceful secret rotation with dual signatures.
-- Partitioning/archival of terminal deliveries and HTTP client reuse.
+
+Scaling work is deferred until its signal shows a real limit. Each is cheap to add later except partitioning, which requires moving existing data:
+
+| Deferred change | Add when |
+|---|---|
+| Per-subscription `maxInFlight` setting, approval-gated, capped by deployment | One subscription's queue age grows while the pool has idle capacity |
+| HTTP client reuse keyed by host and vetted address, re-resolving DNS before each use | Median attempt duration is well above typical endpoint response time |
+| Batch claims up to a subscription's free slots | Claim-transaction duration limits a busy subscription |
+| Omit audit capture on append-only `business_events` and the delivery ledger (about 25% fewer writes per event) | Database write load from webhooks is measured as a problem |
+| Time-based partitioning or archival of deliveries and ledger | Table size affects maintenance or storage |
 
 ## Risks / Trade-offs
 

@@ -185,6 +185,7 @@ struct RuntimeTests {
         _ body: (Application) async throws -> Void
     ) async throws {
         let app = try await Application.make(environment)
+        app.webhookEncryptionKey = try WebhookEncryptionKey(base64: Data(repeating: 19, count: 32).base64EncodedString())
         do {
             try await body(app)
         } catch {

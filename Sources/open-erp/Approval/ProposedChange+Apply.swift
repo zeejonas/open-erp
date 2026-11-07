@@ -21,6 +21,20 @@ extension ProposedChange {
         }
 
         switch self {
+        case .webhookSubscriptionCreate(let config):
+            _ = try await lockOrganization(organizationID, on: db)
+            guard !config.enabled else { throw Abort(.badRequest, reason: "Subscriptions must be created disabled") }
+            guard try await WebhookSubscription.query(on: db).filter(\.$organization.$id == organizationID).count() < 100 else {
+                throw Abort(.conflict, reason: "Organization webhook subscription limit reached")
+            }
+            try await WebhookSubscriptionService.validate(config, organizationID: organizationID, on: db)
+        case .webhookSubscriptionUpdate(let id, let expected, _, let config, _):
+            let (subscription, _) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
+            try throwIfStale(subscription.currentRevisionID != expected)
+            try await WebhookSubscriptionService.validate(config, organizationID: organizationID, on: db)
+        case .webhookSubscriptionDelete(let id, let expected):
+            let (subscription, _) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
+            try throwIfStale(subscription.currentRevisionID != expected)
         case .organizationUpdate(let id, let before, let after):
             let organization = try await requireOrganization(id, on: db)
             try throwIfStale(before.code != after.code && organization.code != before.code)
@@ -151,8 +165,35 @@ extension ProposedChange {
         }
     }
 
-    func apply(on db: any Database, actorID: UUID, organizationID: UUID) async throws -> ApprovalWriteResult {
+    func apply(on db: any Database, actorID: UUID, organizationID: UUID, webhookKey: WebhookEncryptionKey? = nil) async throws -> ApprovalWriteResult {
         switch self {
+        case .webhookSubscriptionCreate(let config):
+            let key = try webhookKey ?? WebhookEncryptionKey.load()
+            return ApprovalWriteResult(try await WebhookSubscriptionService.create(config, organizationID: organizationID, actorID: actorID, key: key, on: db))
+        case .webhookSubscriptionUpdate(let id, _, let before, let config, let rotate):
+            let (subscription, prior) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
+            subscription.currentRevisionID = UUID()
+            let revision = try await WebhookSubscriptionService.append(config, to: subscription, prior: prior, rotate: rotate, actorID: actorID, key: webhookKey, on: db)
+            if config.enabled && (!before.enabled || changedFields().contains("enabled")) {
+                subscription.disabledReason = nil
+                subscription.disabledAt = nil
+                subscription.disabledBy = nil
+                subscription.disabledActorType = nil
+                subscription.disabledActorName = nil
+                subscription.failingSince = nil
+            }
+            subscription.updatedBy = actorID
+            subscription.updatedAt = try await WebhookSubscriptionService.transactionTime(on: db)
+            try await subscription.update(on: db)
+            try await WebhookRevocation.cancelUnauthorized(subscription: subscription, current: revision, on: db)
+            return ApprovalWriteResult(try WebhookSubscriptionDTO(subscription, revision: revision))
+        case .webhookSubscriptionDelete(let id, _):
+            let (subscription, _) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
+            try await WebhookRevocation.cancelQueued(subscriptionID: id, reason: .subscriptionDeleted, on: db)
+            subscription.deletedBy = actorID
+            try await subscription.update(on: db)
+            try await subscription.delete(on: db)
+            return ApprovalWriteResult(HTTPStatus.noContent)
         case .organizationUpdate(let id, let before, let after):
             let organization = try await requireOrganization(id, on: db)
             if before.code != after.code { organization.code = after.code }
@@ -161,10 +202,13 @@ extension ProposedChange {
             try await conflictOnDuplicate(duplicateOrganization) {
                 try await organization.update(on: db)
             }
+            if !changedFields().isEmpty { try await organization.emit(.organizationUpdated, changedFields: changedFields(), on: db) }
             return ApprovalWriteResult(organization.toGetDTO())
         case .organizationDelete(let id, _):
             let organization = try await requireOrganization(id, on: db)
+            try await WebhookRevocation.disableOrganization(id, on: db)
             try await organization.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await organization.emit(.organizationDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .companyCreate(let snapshot):
             let company = Company(
@@ -179,6 +223,7 @@ extension ProposedChange {
             try await conflictOnDuplicate(duplicateCompany) {
                 try await company.save(on: db)
             }
+            try await company.emit(.companyCreated, on: db)
             return ApprovalWriteResult(company.toGetDTO())
         case .companyUpdate(let id, let before, let after):
             let company = try await requireCompany(id, organizationID: organizationID, on: db)
@@ -188,22 +233,27 @@ extension ProposedChange {
             try await conflictOnDuplicate(duplicateCompany) {
                 try await company.update(on: db)
             }
+            if !changedFields().isEmpty { try await company.emit(.companyUpdated, changedFields: changedFields(), on: db) }
             return ApprovalWriteResult(company.toGetDTO())
         case .companyDelete(let id, _):
             let company = try await requireCompany(id, organizationID: organizationID, on: db)
             let companyID = try company.requireID()
             for link in try await GroupCompany.query(on: db).filter(\.$company.$id == companyID).all() {
                 try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+                try await link.emit(.groupCompanyDeleted, on: db)
             }
             try await company.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await company.emit(.companyDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .organizationUserDelete(let userID):
             let membership = try await requireMembership(userID: userID, organizationID: organizationID, on: db)
             let membershipID = try membership.requireID()
             for groupMembership in try await GroupMember.query(on: db).filter(\.$organizationUser.$id == membershipID).all() {
                 try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await groupMembership.emit(.groupMemberDeleted, on: db)
             }
             try await membership.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await membership.emit(.organizationUserDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .organizationInvitationCreate(let draft):
             if let invitationID = draft.invitationId {
@@ -212,6 +262,7 @@ extension ProposedChange {
                 }
                 invitation.expiresAt = Date().addingTimeInterval(InvitationToken.lifetime)
                 try await invitation.update(on: db)
+                try await invitation.emit(.invitationIssued, on: db)
                 return ApprovalWriteResult(CreateInvitationResponse(invitation: invitation.toGetDTO(), token: ""))
             }
             let (invitation, token) = try await OrganizationInvitation.issue(
@@ -223,10 +274,12 @@ extension ProposedChange {
                 createdByID: actorID,
                 on: db
             )
+            try await invitation.emit(.invitationIssued, on: db)
             return ApprovalWriteResult(CreateInvitationResponse(invitation: invitation.toGetDTO(), token: token))
         case .organizationInvitationDelete(let id):
             let invitation = try await requireOpenInvitation(id, organizationID: organizationID, on: db)
             try await invitation.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await invitation.emit(.invitationRevoked, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .roleCreate(let draft):
             let permissions = try resolvedPermissions(draft.permissions, level: draft.level)
@@ -241,6 +294,7 @@ extension ProposedChange {
                 try await role.setPermissions(permissions, actorID: actorID, on: db)
                 return role
             }
+            try await role.emit(.roleCreated, on: db)
             return ApprovalWriteResult(role.toGetDTO())
         case .roleUpdate(let id, let before, let after):
             let role = try await requireRole(id, organizationID: organizationID, on: db)
@@ -258,10 +312,12 @@ extension ProposedChange {
                 try await role.update(on: db)
                 return role
             }
+            if !changedFields().isEmpty { try await saved.emit(.roleUpdated, changedFields: changedFields(), on: db) }
             return ApprovalWriteResult(saved.toGetDTO())
         case .roleDelete(let id, _):
             let role = try await requireRole(id, organizationID: organizationID, on: db)
             try await role.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await role.emit(.roleDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupCreate(let name):
             let group = AccessGroup(organizationID: organizationID, name: name, createdByID: actorID)
@@ -269,6 +325,7 @@ extension ProposedChange {
                 try await group.save(on: db)
             }
             try await group.loadAssignments(on: db)
+            try await group.emit(.groupCreated, on: db)
             return ApprovalWriteResult(group.toGetDTO())
         case .groupUpdate(let id, let before, let after):
             let group = try await requireGroup(id, organizationID: organizationID, on: db)
@@ -280,10 +337,20 @@ extension ProposedChange {
                 try await group.update(on: db)
             }
             try await group.loadAssignments(on: db)
+            if !changedFields().isEmpty { try await group.emit(.groupUpdated, changedFields: changedFields(), on: db) }
             return ApprovalWriteResult(group.toGetDTO())
         case .groupDelete(let id, _):
             let group = try await requireGroup(id, organizationID: organizationID, on: db)
+            for link in try await GroupRole.query(on: db).filter(\.$group.$id == id).all() {
+                try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+                try await link.emit(.groupRoleDeleted, on: db)
+            }
+            for link in try await GroupCompany.query(on: db).filter(\.$group.$id == id).all() {
+                try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+                try await link.emit(.groupCompanyDeleted, on: db)
+            }
             try await group.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await group.emit(.groupDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupMemberCreate(let draft):
             let membership = try await requireMembership(userID: draft.userId, organizationID: organizationID, on: db)
@@ -296,30 +363,36 @@ extension ProposedChange {
             try await conflictOnDuplicate(duplicateMember) {
                 try await groupMembership.save(on: db)
             }
+            try await groupMembership.emit(.groupMemberCreated, on: db)
             return ApprovalWriteResult(groupMembership.toGetDTO(userID: draft.userId))
         case .groupMemberDelete(let draft):
             let groupMembership = try await requireGroupMember(draft, organizationID: organizationID, on: db)
             try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await groupMembership.emit(.groupMemberDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupRoleCreate(let draft):
             let link = GroupRole(organizationID: organizationID, groupID: draft.groupId, roleID: draft.roleId, createdByID: actorID)
             try await conflictOnDuplicate(duplicateGroupRole) {
                 try await link.save(on: db)
             }
+            try await link.emit(.groupRoleCreated, on: db)
             return ApprovalWriteResult(link.toGetDTO())
         case .groupRoleDelete(let draft):
             let link = try await requireGroupRole(draft, on: db)
             try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await link.emit(.groupRoleDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .groupCompanyCreate(let draft):
             let link = GroupCompany(organizationID: organizationID, groupID: draft.groupId, companyID: draft.companyId, createdByID: actorID)
             try await conflictOnDuplicate(duplicateGroupCompany) {
                 try await link.save(on: db)
             }
+            try await link.emit(.groupCompanyCreated, on: db)
             return ApprovalWriteResult(link.toGetDTO())
         case .groupCompanyDelete(let draft):
             let link = try await requireGroupCompany(draft, on: db)
             try await link.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await link.emit(.groupCompanyDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .approvalPolicyCreate(let definition):
             let definition = definition.normalized()
@@ -346,6 +419,7 @@ extension ProposedChange {
                 try await policy.$slots.load(on: db)
                 return policy
             }
+            try await policy.emit(.approvalPolicyCreated, on: db)
             return ApprovalWriteResult(policy.toGetDTO())
         case .approvalPolicyUpdate(let id, let before, let after):
             let policy = try await requirePolicy(id, organizationID: organizationID, on: db)
@@ -383,10 +457,12 @@ extension ProposedChange {
                 try await policy.$slots.load(on: db)
                 return policy
             }
+            if !changedFields().isEmpty { try await saved.emit(.approvalPolicyUpdated, changedFields: changedFields(), on: db) }
             return ApprovalWriteResult(saved.toGetDTO())
         case .approvalPolicyDelete(let id, _):
             let policy = try await requirePolicy(id, organizationID: organizationID, on: db)
             try await policy.softDelete(by: actorID, \.$deletedBy, on: db)
+            try await policy.emit(.approvalPolicyDeleted, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         }
     }

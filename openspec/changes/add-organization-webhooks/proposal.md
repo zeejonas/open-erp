@@ -6,7 +6,7 @@ Organizations need reliable notifications of committed ERP changes and approval 
 
 - Capture versioned, organization-owned business events and a dispatch record in the same Postgres transaction as supported business operations, including approval application and operational commands. Subscriber fan-out happens in the worker, so business-write cost does not grow with subscriber count.
 - Add organization-owned webhook subscriptions with explicit event/company scopes, immutable configuration revisions, approval-gateable activation and changes, immediate emergency disable, and immediate secret rotation.
-- Run a separate, horizontally scalable `webhook-worker` process from the existing Swift application/image. It fans events out to matching subscriptions, claims committed work under configurable pool-wide limits, sends Standard Webhooks HMAC-signed HTTPS notifications, retries failures, and records append-only attempt evidence.
+- Run a separate, horizontally scalable `webhook-worker` process from the existing Swift application/image. It fans events out to matching subscriptions, claims committed work with per-process concurrency and pool-wide per-subscription/per-organization limits so capacity grows with replicas, sends Standard Webhooks HMAC-signed HTTPS notifications, retries failures, and records append-only attempt evidence.
 - Automatically pause subscriptions whose endpoint has failed continuously for 72 hours, attributed to the system and visible in health.
 - Expose an event catalog, event and delivery history, integration health, restricted payload inspection, and recorded secret disclosure.
 - Preserve the distinction between recorded approval decisions, successfully applied changes, endpoint acknowledgments, and downstream processing.
@@ -38,6 +38,6 @@ Organizations need reliable notifications of committed ERP changes and approval 
 ## Non-goals
 
 - Kafka or any non-HTTPS transport, direct customer broker access, event sourcing, arbitrary workflow execution, inbound business webhooks, UI implementation, global or per-subscription event ordering, and exactly-once external side effects.
-- Deferred to a follow-up change: approval-gated replay, synthetic test deliveries, the cross-table evidence API, `webhook-verify` audit/event/delivery reconciliation, graceful dual-signed secret rotation, delivery archival/partitioning and HTTP connection reuse.
+- Deferred to a follow-up change: approval-gated replay, synthetic test deliveries, the cross-table evidence API, `webhook-verify` audit/event/delivery reconciliation, graceful dual-signed secret rotation, and scaling work gated on measured signals: per-subscription concurrency settings, HTTP connection reuse, batch claims, reduced audit capture on append-only tables, and delivery archival/partitioning.
 - New business restore/purge capabilities, new financial modules, automatic publication of every table, retrospective delivery to new subscriptions, downstream processing receipts, and automatic evidence deletion.
 - Managed immutable archive infrastructure or deployment-specific SOX retention policy; evidence is retained indefinitely until separately specified.

@@ -289,6 +289,7 @@ extension OpenERPTests {
             }, afterResponse: { res async in
                 #expect(res.status == .notFound, "Invitations to a deleted organization cannot be accepted")
             })
+            try await expectProducedEvents(.invitations, on: app.db)
         }
     }
 

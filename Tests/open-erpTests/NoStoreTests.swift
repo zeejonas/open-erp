@@ -1,5 +1,6 @@
 @testable import open_erp
 import Testing
+import Foundation
 import VaporTesting
 
 @Suite("Response cache policy")
@@ -7,6 +8,7 @@ struct NoStoreTests {
     @Test("Global policy covers documentation and errors and replaces competing cache headers")
     func responsePolicy() async throws {
         let app = try await Application.make(.testing)
+        app.webhookEncryptionKey = try WebhookEncryptionKey(base64: Data(repeating: 23, count: 32).base64EncodedString())
         do {
             try await configure(app)
             app.get("cacheable") { _ in

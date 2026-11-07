@@ -24,7 +24,7 @@ struct OpenAPIExportTests {
                 exports.append(data)
                 let document = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
                 let paths = try #require(document["paths"] as? [String: [String: Any]])
-                #expect(paths.values.reduce(0) { $0 + $1.count } == 59)
+                #expect(paths.values.reduce(0) { $0 + $1.count } == 76)
                 let components = try #require(document["components"] as? [String: Any])
                 let schemas = try #require(components["schemas"] as? [String: [String: Any]])
                 let audit = try #require(schemas["AuditEventDTO"])

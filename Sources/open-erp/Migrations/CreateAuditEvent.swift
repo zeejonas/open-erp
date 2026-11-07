@@ -104,11 +104,20 @@ struct CreateAuditEvent: AsyncMigration {
         """
 }
 
+enum CapturedOperation: String, CaseIterable, Sendable {
+    case insert = "INSERT", update = "UPDATE", delete = "DELETE"
+}
+
 extension Database {
-    func createChangeTrigger(on table: String, redact columns: [String] = []) async throws {
+    func createChangeTrigger(
+        on table: String, redact columns: [String] = [],
+        operations: [CapturedOperation] = CapturedOperation.allCases
+    ) async throws {
+        precondition(!operations.isEmpty)
+        let events = operations.map(\.rawValue).joined(separator: " OR ")
         try await requireSQL().raw("""
             CREATE TRIGGER capture_audit_change
-            AFTER INSERT OR UPDATE OR DELETE ON public.\(ident: table)
+            AFTER \(unsafeRaw: events) ON public.\(ident: table)
             FOR EACH ROW
             EXECUTE FUNCTION audit.capture_change(\(literals: columns, joinedBy: ", "))
             """).run()

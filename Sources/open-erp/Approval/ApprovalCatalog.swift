@@ -19,7 +19,7 @@ enum ApprovalTrackStatus: String, Codable, Sendable {
     case approved
 }
 
-enum ApprovalDecisionKind: String, Codable, Sendable {
+enum ApprovalDecisionKind: String, Codable, CaseIterable, Sendable {
     case approve
     case reject
     case override
@@ -45,10 +45,20 @@ enum ApprovalCatalog {
         .roleUpdate: ["name", "permissions"],
         .groupUpdate: ["name"],
         .approvalPolicyUpdate: ["name", "fields", "companyId", "stages"],
+        .webhookSubscriptionUpdate: ["name", "url", "eventTypes", "companyIds", "enabled", "rotateSecret"],
     ]
 
     static func isGateable(_ permission: Permission) -> Bool {
-        !permission.isRead && permission != .approvalOverrideCreate
+        switch permission {
+        case .organizationUpdate, .organizationDelete, .companyCreate, .companyUpdate, .companyDelete,
+             .organizationUserDelete, .organizationInvitationCreate, .organizationInvitationDelete,
+             .roleCreate, .roleUpdate, .roleDelete, .groupCreate, .groupUpdate, .groupDelete,
+             .groupMemberCreate, .groupMemberDelete, .groupRoleCreate, .groupRoleDelete,
+             .groupCompanyCreate, .groupCompanyDelete, .approvalPolicyCreate, .approvalPolicyUpdate,
+             .approvalPolicyDelete, .webhookSubscriptionCreate, .webhookSubscriptionUpdate, .webhookSubscriptionDelete:
+            true
+        default: false
+        }
     }
 
     static func supportsCompanyScope(_ permission: Permission) -> Bool {

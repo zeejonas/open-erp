@@ -243,6 +243,7 @@ extension OpenERPTests {
 
 private func withRevocationPeer(_ source: Application, _ test: (Application) async throws -> Void) async throws {
     let peer = try await Application.make(.testing)
+    peer.webhookEncryptionKey = source.webhookEncryptionKey
     do {
         try await configure(peer)
         peer.jwt.keys = source.jwt.keys
