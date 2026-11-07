@@ -25,6 +25,19 @@ struct OpenAPIExportTests {
                 let document = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
                 let paths = try #require(document["paths"] as? [String: [String: Any]])
                 #expect(paths.values.reduce(0) { $0 + $1.count } == 59)
+                let components = try #require(document["components"] as? [String: Any])
+                let schemas = try #require(components["schemas"] as? [String: [String: Any]])
+                let audit = try #require(schemas["AuditEventDTO"])
+                let properties = try #require(audit["properties"] as? [String: Any])
+                #expect(Set(properties.keys) == Set([
+                    "id", "createdAt", "organizationId", "table", "recordId", "operation",
+                    "changedFields", "oldValues", "newValues", "actorType", "actorId", "actorName",
+                    "ipAddress", "requestId", "approvalRequestId", "databaseUser", "transactionId",
+                ]))
+                #expect((audit["required"] as? [String])?.contains("transactionId") == true)
+                #expect(schemas["AuditActorType"]?["enum"] as? [String] == [
+                    "user", "platform_admin", "operator", "system", "database",
+                ])
                 try await app.testing().test(.GET, "openapi.json", afterResponse: { response async throws in
                     #expect(response.status == .ok)
                     let http = try #require(JSONSerialization.jsonObject(with: Data(response.body.readableBytesView)) as? NSDictionary)
