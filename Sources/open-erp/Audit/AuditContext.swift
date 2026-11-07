@@ -3,7 +3,7 @@ import Foundation
 import SQLKit
 import Vapor
 
-enum AuditActorType: String, Codable, Sendable {
+enum AuditActorType: String, Codable, CaseIterable, Sendable {
     case user, platformAdmin = "platform_admin", `operator`, system, database
 }
 
