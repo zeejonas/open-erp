@@ -3,9 +3,7 @@
 ## Purpose
 
 Separation of schema ownership from runtime database access, and the checks that enforce it.
-
 ## Requirements
-
 ### Requirement: Separate database roles
 Deployments SHALL use an owner role to own the schema and run migrations, and a runtime role to serve the API. The runtime role SHALL NOT be a superuser, bypass row-level security, create databases or roles, own application objects, or be a member of the owner role. The repository SHALL provide idempotent bootstrap SQL for these roles and the `audit` schema, without committed production passwords. Bootstrap SHALL grant the owner `CREATE` on `public` and SHALL revoke `CREATE` on `public` from `PUBLIC`.
 
@@ -45,7 +43,7 @@ The runtime role SHALL have `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on applic
 - **THEN** the database denies permission
 
 ### Requirement: Unsafe serving role rejected
-When serving in the production environment, the system SHALL fail startup if its database session user is a superuser or a member of the role that owns the `audit` schema. In other non-testing environments, it SHALL log a warning. Migration and operational commands SHALL NOT be subject to this startup check.
+When serving the API or running the continuous webhook delivery worker in the production environment, the system SHALL fail startup if its database session user is a superuser or a member of the role that owns the `audit` schema. In other non-testing environments, it SHALL log a warning. Migration and other operational commands SHALL NOT be subject to this startup check; the continuous webhook delivery worker SHALL be checked because it is an application runtime, not a schema-administration command.
 
 #### Scenario: Production owner connection
 - **WHEN** the API starts with `--env production` as the audit schema owner
@@ -58,3 +56,12 @@ When serving in the production environment, the system SHALL fail startup if its
 #### Scenario: Migration uses owner role
 - **WHEN** `migrate` runs as the owner role in production
 - **THEN** the startup check does not block it
+
+#### Scenario: Worker owner connection rejected
+- **WHEN** webhook-worker starts in production with a superuser or audit-owner-member session
+- **THEN** startup fails before any delivery is claimed
+
+#### Scenario: Worker runtime connection accepted
+- **WHEN** webhook-worker starts in production as the safe runtime role
+- **THEN** the same database role check passes without requiring migration privileges
+
