@@ -52,6 +52,16 @@ The API runs in production mode only with real OIDC configuration (`OIDC_ISSUER`
 
 **Resource limits are fixed.** The app gets `cpus: 2` and `mem_limit: 1g`, and the database gets `cpus: 2`, set in the Compose override. Event loops follow the CPUs Swift sees, so the report states the effective loop count. The limits can be overridden, and the report records whatever was used.
 
+**Implementation notes.**
+- All services share an `internal: true` Compose network. Nothing in the run needs the internet, and seeded deliveries can't reach a resolver outside the host.
+- Writes that grow the dataset (company create, subscription create, patch and disable) clean up in the same iteration with an unmeasured delete. This keeps later scenarios on the same dataset and stays under the 100-subscription limit per organization.
+- Setup and cleanup requests count toward a step's rate (`requests` per route), so a step's rate is the load the API receives. A smoke run that counted only the measured request sent twice the writes, saturated both app and database CPUs, and made company create and delete look 30× slower than they are alone.
+- Subscription writes run at `steps.lowFrequencyRates`. Creates take the organization lock to enforce the 100-subscription limit, so at hundreds of RPS they queue on that lock (about 11 ms mean wait in `pg_stat_statements`) and hit the limit; neither reflects real traffic.
+- Reads run before writes, lists use the default page size, and company patches use a row per VU, because concurrent patches of one company correctly return 409. A `per=100` event-list variant stays: full pages cost about 10 ms of app CPU each, which caps that list near 100 RPS per app CPU.
+- Seeded actors are administrators (`org_admins`, used for writes and payload or secret reads) and viewers (`org_viewers`, used for reads and the missing-permission checks). Only a few subscriptions are enabled, each filtered to a few companies, so delivery history stays around a thousand rows.
+- The worker runs until the dispatch queue is empty and every delivery has at least one attempt.
+- Step verdicts come from k6 thresholds, so k6 exits 99 whenever a step saturates. `run.sh` accepts that exit code. A separate `report.js` k6 run merges the pg samples and sets the run verdict: an isolation failure, or a secret disclosure by a non-administrator (counted in the database), fails it.
+
 ## Risks / Trade-offs
 
 - [Docker on macOS adds virtualization overhead, so absolute RPS will be lower than on Linux hosts] → The report records host and limits. Compare runs on like hosts, and treat the figures as relative.

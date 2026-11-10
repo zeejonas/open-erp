@@ -1,0 +1,41 @@
+{
+  "dataset": {
+    "organizations": 2,
+    "adminsPerOrganization": 5,
+    "membersPerOrganization": 50,
+    "companiesPerOrganization": 500,
+    "companyUpdatesPerCompany": 4,
+    "subscriptionsPerOrganization": 20,
+    "enabledSubscriptionsPerOrganization": 4,
+    "companiesPerEnabledSubscription": 25
+  },
+  "steps": {
+    "rates": [25, 50, 100, 200, 400, 800, 1600],
+    "lowFrequencyRates": [2, 5, 10, 20, 40],
+    "duration": "30s",
+    "pause": "10s",
+    "maxVUs": 600
+  },
+  "budgets": {
+    "readP95Ms": 300,
+    "writeP95Ms": 500
+  },
+  "isolation": {
+    "rate": 5
+  },
+  "mixed": {
+    "rate": 200,
+    "duration": "2m",
+    "weights": {
+      "me_get": 10,
+      "companies_list": 20,
+      "companies_get": 25,
+      "companies_patch": 5,
+      "users_list": 5,
+      "webhook_subscriptions_list": 5,
+      "webhook_deliveries_list": 10,
+      "webhook_deliveries_get": 10,
+      "webhook_events_list": 10
+    }
+  }
+}

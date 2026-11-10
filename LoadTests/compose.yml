@@ -1,0 +1,119 @@
+# Load-test stack. Start it only through LoadTests/run.sh, which owns setup and teardown.
+# The project name, volume and database name keep it apart from development data.
+name: open-erp-loadtest
+
+# The internal network has no route off the host, so seeded webhook deliveries to
+# `.invalid` hosts fail at name resolution and nothing leaves the machine.
+networks:
+  loadtest:
+    internal: true
+
+volumes:
+  db_data:
+
+x-database: &database
+  DATABASE_HOST: db
+  DATABASE_NAME: ${DATABASE_NAME:?run LoadTests/run.sh}
+  DATABASE_TLS_MODE: disable
+  DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP: ${DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP:-4}
+  WEBHOOK_KEY_ENCRYPTION_KEY: ${WEBHOOK_KEY_ENCRYPTION_KEY:?run LoadTests/run.sh}
+  LOG_LEVEL: warning
+
+x-runtime: &runtime
+  <<: *database
+  DATABASE_USERNAME: open_erp_runtime
+  DATABASE_PASSWORD: open_erp_runtime_local
+
+# Only `app` builds the image; the other services reuse it.
+x-app: &app
+  image: open-erp:loadtest
+  pull_policy: never
+  networks: [loadtest]
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:18-alpine
+    networks: [loadtest]
+    volumes:
+      - db_data:/var/lib/postgresql
+      - ../Database/bootstrap.sql:/docker-entrypoint-initdb.d/00-bootstrap.sql:ro
+      - ../Database/compose-passwords.sql:/docker-entrypoint-initdb.d/01-compose-passwords.sql:ro
+    environment:
+      POSTGRES_USER: loadtest_admin
+      POSTGRES_PASSWORD: loadtest_admin
+      POSTGRES_DB: ${DATABASE_NAME:?run LoadTests/run.sh}
+    cpus: ${DB_CPUS:-2}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U loadtest_admin -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  oidc-stub:
+    build:
+      context: OIDCStub
+    networks: [loadtest]
+    environment:
+      OIDC_ISSUER: http://oidc-stub:8081
+      OIDC_AUDIENCE: open-erp-loadtest
+
+  migrate:
+    <<: *app
+    profiles: [tools]
+    environment:
+      <<: *database
+      DATABASE_USERNAME: open_erp_owner
+      DATABASE_PASSWORD: open_erp_owner_local
+    command: ["migrate", "--yes", "--env", "production"]
+
+  cli:
+    <<: *app
+    profiles: [tools]
+    environment: *runtime
+
+  app:
+    <<: *app
+    build:
+      context: ..
+    depends_on:
+      db:
+        condition: service_healthy
+      oidc-stub:
+        condition: service_started
+    environment:
+      <<: *runtime
+      OIDC_ISSUER: http://oidc-stub:8081
+      OIDC_AUDIENCE: open-erp-loadtest
+      OIDC_JWKS_URL: http://oidc-stub:8081/.well-known/jwks.json
+      OIDC_USERINFO_URL: http://oidc-stub:8081/userinfo
+      OIDC_ALLOW_INSECURE_HTTP: "true"
+      HSTS_MAX_AGE_SECONDS: "0"
+      TRUSTED_PROXY_COUNT: "0"
+    cpus: ${APP_CPUS:-2}
+    mem_limit: ${APP_MEMORY:-1g}
+    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]
+
+  worker:
+    <<: *app
+    init: true
+    environment: *runtime
+    command: ["webhook-worker", "--env", "production"]
+
+  k6:
+    image: grafana/k6@sha256:3ddc8b1a33a2c3d8edc6e99b6a762ae36cba08788463458f5e6a7703e14eb77d
+    profiles: [tools]
+    networks: [loadtest]
+    cpus: ${K6_CPUS:-2}
+    # Report files belong to the operator running the harness.
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
+    volumes:
+      - ./k6:/scripts:ro
+      - ${LOADTEST_CONFIG:-./config.json}:/config/config.json:ro
+      - ${REPORT_DIR:-./reports/unset}:/out
+    environment:
+      BASE_URL: http://app:8080
+      OIDC_URL: http://oidc-stub:8081
+      K6_NO_USAGE_REPORT: "true"

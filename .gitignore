@@ -19,3 +19,5 @@ default.profraw
 .cursor
 
 .local-backups/
+
+LoadTests/reports/

@@ -584,3 +584,51 @@ state. Correct schema/code forward and restart with the same key/runtime credent
 manual evidence rewrites or evidence deletion. Receiver idempotency handles unknown remote
 outcomes. Replay, synthetic deliveries, cross-table reconciliation, archive infrastructure and
 production retention policy are separate changes.
+
+## Load testing
+
+`LoadTests/` measures how many requests per second each user, company and webhook endpoint
+supports. It runs on demand only, never in `swift test` or CI. The only prerequisite is Docker.
+
+```bash
+LoadTests/run.sh
+```
+
+The script builds the production image and starts a separate Compose project
+(`open-erp-loadtest`) with its own database volume, an OIDC stub and the webhook worker, all on
+an internal network with no route off the host. It refuses to run unless the database is
+`open_erp_loadtest`. It creates a platform administrator with the CLI, seeds organizations,
+members, companies, subscriptions and events through the API, runs the worker until every
+delivery has an attempt (each fails at name resolution, because the destinations use `.invalid`),
+then stops the worker and measures. At the end it removes the stack and its database; `--keep`
+leaves them running for inspection. Dataset sizes, steps and latency budgets are in
+`LoadTests/config.json`; pass another file with `--config`. The default plan takes about two and
+a half hours. For a quick check, `LoadTests/run.sh --config LoadTests/config.smoke.json` runs every
+endpoint for 10 s at 200 RPS on a smaller dataset, in about 15 minutes. It reports pass or fail at
+that rate rather than a supported RPS, so compare smoke runs only with other smoke runs.
+
+Each endpoint is driven at an open arrival rate in steps (25 to 1600 RPS, 30 s each). Reads run
+before writes, and lists use the default page size, with one `per=100` event-list variant.
+Subscription create, patch, delete and disable run at lower rates (2 to 40 RPS): creates
+serialize per organization to enforce the 100-subscription limit, and they are rare in real
+traffic. When a scenario needs setup or cleanup requests (a company to delete, a subscription to
+patch), those count toward the step's rate, so the rate is always what the API receives; the
+report's Requests column shows how many requests each iteration sends. A step
+passes when p95 latency is within budget (300 ms reads, 500 ms writes), under 1% of requests
+fail, and at least 95% of the target requests were sent. **Supported RPS** is the highest
+passing step before the first failing one; "≥" means no step failed, so the figure is a lower
+bound. A step where k6 fell behind while the API stayed within budget is marked
+*generator-bound*: give k6 more CPUs (`K6_CPUS`) rather than reading it as an API limit.
+A weighted mixed workload runs last. Throughout the run, a 5 RPS stream of cross-tenant,
+missing-permission and invalid-token requests must always be refused; any success fails the run.
+
+Reports go to `LoadTests/reports/<timestamp>/report.md` and `report.json` (git-ignored). They
+record per-step p50/p95/p99 and error rate, peak `open_erp_runtime` connections against the
+pool ceiling (event loops × `DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP`), the git commit, the app's
+CPU and memory limits (`APP_CPUS`, `APP_MEMORY`, defaults 2 and `1g`), the host CPU count and
+the dataset. They contain no tokens, secrets or response bodies. Compare runs only on like hosts
+with the same limits. On macOS, Docker's virtual machine adds overhead and shares CPUs with k6,
+so treat absolute figures as relative.
+
+The harness does not cover other route groups, outbound webhook delivery throughput,
+approval-held writes, database TLS, or multi-replica deployments.
