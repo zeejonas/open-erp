@@ -3,11 +3,9 @@
 ## Purpose
 
 Zero-trust organization permissions granted only through groups, and roles copied from templates. Enforcing company-level permissions is out of scope.
-
 ## Requirements
-
 ### Requirement: Permission catalog
-The system SHALL define permissions in code as `resource:action`, where action is one of `create`, `read`, `update`, `delete`, and each permission has a level of `organization` or `company`. Every permission in the catalog SHALL be enforced by at least one route. The catalog SHALL contain the following organization-level permissions:
+The system SHALL define permissions in code as `resource:action`, where action is one of `create`, `read`, `update`, `delete`, or the explicitly defined emergency `disable`, and each permission has a level of `organization` or `company`. Every permission in the catalog SHALL be enforced by at least one route. The catalog SHALL contain the following organization-level permissions:
 
 - `organization:read`, `organization:update`, `organization:delete`
 - `company:create`, `company:read`, `company:update`, `company:delete`
@@ -22,6 +20,8 @@ The system SHALL define permissions in code as `resource:action`, where action i
 - `approval_request:read`
 - `approval_override:create`
 - `audit_event:read`
+- `webhook_subscription:create`, `webhook_subscription:read`, `webhook_subscription:update`, `webhook_subscription:delete`, `webhook_subscription:disable`
+- `webhook_event:read`, `webhook_payload:read`, `webhook_delivery:read`, `webhook_secret:read`
 
 #### Scenario: Unknown permission rejected
 - **WHEN** a client creates or updates a role with a permission string not in the catalog
@@ -38,6 +38,10 @@ The system SHALL define permissions in code as `resource:action`, where action i
 #### Scenario: Templates include audit read
 - **WHEN** an organization is provisioned
 - **THEN** "Organization Administrator" and "Organization Viewer" both hold `audit_event:read`
+
+#### Scenario: Webhook permissions are explicit
+- **WHEN** an authorized member reads the permission catalog
+- **THEN** every webhook permission is listed at organization level and no permission implies another
 
 ### Requirement: Zero-trust enforcement
 A user SHALL hold an organization-level permission in an organization only if their active membership belongs, through an active group membership, to an active group in that organization that holds an active attachment to an active organization-level role whose permissions include it. Groups SHALL be the only path to a role. No permission SHALL be implied by a missing, null, or default value, by template origin, by company eligibility, or by the platform administrator flag.
@@ -153,7 +157,7 @@ Members with role permissions SHALL be able to manage roles in their organizatio
 The system SHALL define role templates in code. Provisioning an organization SHALL copy every template into that organization as ordinary, editable roles, recording `template_key` for reporting only. Later template changes SHALL NOT alter existing organizations' roles, and `template_key` SHALL NOT influence any access decision. This change SHALL ship:
 
 - **Organization Administrator** (`org_admin`, organization level): every organization-level permission.
-- **Organization Viewer** (`org_viewer`, organization level): every organization-level `:read` permission.
+- **Organization Viewer** (`org_viewer`, organization level): every organization-level `:read` permission except `webhook_payload:read` and `webhook_secret:read`. Payload inspection and secret disclosure SHALL each require an explicit separate grant, even for a copied viewer role.
 
 #### Scenario: Templates copied at provisioning
 - **WHEN** an organization is provisioned
@@ -162,6 +166,14 @@ The system SHALL define role templates in code. Provisioning an organization SHA
 #### Scenario: Copied role is editable
 - **WHEN** a member with `role:update` removes a permission from the copied "Organization Viewer"
 - **THEN** the change applies to that organization only
+
+#### Scenario: Viewer has metadata but not payload access
+- **WHEN** an organization is provisioned
+- **THEN** its viewer role contains webhook subscription/event/delivery read permissions but not payload-read, secret-read, disable or management permissions
+
+#### Scenario: Existing roles are not silently promoted
+- **WHEN** the new permission catalog is deployed to a retained pre-release database
+- **THEN** copied roles remain unchanged unless an explicit audited bootstrap grants permissions to identified existing full administrators, and partial custom roles are not promoted
 
 ### Requirement: Administrator continuity
 An organization administrator SHALL be an active member holding every organization-level permission in the catalog. The system SHALL refuse, with `409 Conflict` and a `detail` stating why, any member removal, group member removal, group role removal, or role permission removal that would take the organization's number of administrators from one or more to zero. It SHALL evaluate this when a change is submitted and again when it is applied, and a held change that would cause this at apply SHALL end `failed`. Concurrent changes SHALL NOT together remove the last administrator. `template_key` SHALL NOT affect this rule.
@@ -185,7 +197,6 @@ An organization administrator SHALL be an active member holding every organizati
 #### Scenario: Another administrator remains
 - **WHEN** two members are administrators and one is removed
 - **THEN** the removal succeeds
-
 
 #### Scenario: Administrator through a custom group
 - **WHEN** a member holds every permission through a custom group, and the last member of Organization Administrators is removed
@@ -263,3 +274,47 @@ The system SHALL expose `GET /permissions` to members holding `role:read`, listi
 #### Scenario: Other organization's permission does not apply
 - **WHEN** a user holds `audit_event:read` in one organization and supplies another organization where they hold no such permission
 - **THEN** the system responds `403`
+
+### Requirement: Webhook route authorization
+Webhook routes SHALL enforce the permissions defined by business-events, webhook-subscriptions and webhook-delivery, using the same organization membership and effective-permission rules as existing routes. Payload inspection and secret disclosure SHALL each require their explicit additional permission. Neither platform-administrator status nor managing a subscription SHALL implicitly grant tenant payload or secret access. Permission rejection SHALL occur before querying protected payloads or secrets or creating approval/publication work.
+
+#### Scenario: Platform status does not imply tenant access
+- **WHEN** a platform administrator without tenant membership requests tenant webhook payloads
+- **THEN** access is denied without exposing payloads
+
+#### Scenario: Management is not payload read
+- **WHEN** a member has subscription update but lacks payload-read
+- **THEN** that permission alone does not authorize a payload-inspection route
+
+### Requirement: Service account permissions
+The permission catalog SHALL include the organization-level permissions `service_account:create`, `service_account:read`, `service_account:update`, `service_account:delete`, and `service_account:disable`, enforced on these routes:
+
+| Route | Permission |
+|---|---|
+| `POST /service-accounts` | `service_account:create` |
+| `GET /service-accounts`, `GET /service-accounts/:id` | `service_account:read` |
+| `PATCH /service-accounts/:id` | `service_account:update` |
+| `POST /service-accounts/:id/disable` | `service_account:disable` |
+| `DELETE /service-accounts/:id` | `service_account:delete` |
+
+Service accounts SHALL receive permissions only through active group memberships, as people do, and the system SHALL NOT restrict which permissions a service account can be granted.
+
+#### Scenario: Route enforces permission
+- **WHEN** a member lacking `service_account:disable` calls `POST /service-accounts/:id/disable`
+- **THEN** the system responds `403 Forbidden` and the account stays enabled
+
+#### Scenario: Permissions through groups
+- **WHEN** a service account is added to a group whose role grants `company:read`
+- **THEN** the account can call `GET /companies`, and cannot call `POST /companies`
+
+#### Scenario: Templates include the permissions
+- **WHEN** an organization is provisioned
+- **THEN** "Organization Administrator" holds every `service_account` permission and "Organization Viewer" holds `service_account:read`
+
+### Requirement: Service accounts are not administrators
+Administrator continuity SHALL count only people. A service account holding every organization-level permission SHALL NOT count as an administrator, so removing the last person administrator SHALL be refused even when such a service account exists.
+
+#### Scenario: Bot cannot replace the last administrator
+- **WHEN** a service account holds every organization-level permission and a member removes the only person administrator
+- **THEN** the system responds `409 Conflict` and the membership remains
+

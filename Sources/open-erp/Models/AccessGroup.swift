@@ -157,10 +157,11 @@ final class GroupMember: Model, @unchecked Sendable {
         self.$createdBy.id = createdByID
     }
 
-    func toGetDTO(userID: UUID) -> GetGroupMemberDTO {
+    func toGetDTO(userID: UUID, userKind: UserKind) -> GetGroupMemberDTO {
         .init(
             id: id,
             userId: userID,
+            userKind: userKind,
             organizationUserId: $organizationUser.id,
             createdById: $createdBy.id,
             createdAt: createdAt

@@ -3,11 +3,9 @@
 ## Purpose
 
 Durable, attributed evidence of every application-table change, with coverage checks and read APIs.
-
 ## Requirements
-
 ### Requirement: Atomic change capture
-The system SHALL record an audit event in `audit.audit_events` for every committed row insert, update, and delete on every application table, in the same transaction as the change. Each event SHALL contain ID, server time as `created_at`, nullable organization ID, table name, nullable record ID, operation, changed fields, old values, new values, actor type, nullable actor ID, nullable actor name, nullable IP address, nullable request ID, nullable approval request ID, session database user, and transaction ID. Operation SHALL be `create`, `update`, `delete`, `soft_delete`, or `restore`. An update that changes no column SHALL NOT record an event.
+The system SHALL record an audit event in `audit.audit_events` for every committed row insert, update, and delete on every application table, in the same transaction as the change, except where Operational queue capture scope narrows it. Each event SHALL contain ID, server time as `created_at`, nullable organization ID, table name, nullable record ID, operation, changed fields, old values, new values, actor type, nullable actor ID, nullable actor name, nullable IP address, nullable request ID, nullable approval request ID, session database user, and transaction ID. Operation SHALL be `create`, `update`, `delete`, `soft_delete`, or `restore`. An update that changes no column SHALL NOT record an event.
 
 #### Scenario: Update records values
 - **WHEN** a company's name changes
@@ -95,7 +93,7 @@ A write with no audit context SHALL fail and roll back when the session role is 
 - **THEN** the edit is recorded with actor type `database` and that session user
 
 ### Requirement: Sensitive values excluded
-Stored old and new values SHALL exclude `organization_invitations.token_hash`, `users.auth_subject`, and `revoked_access_tokens.fingerprint`. Changed fields SHALL still name an excluded column when it changes. Revocation events SHALL have a null record ID.
+Stored old and new values SHALL exclude `organization_invitations.token_hash`, `users.auth_subject`, `revoked_access_tokens.fingerprint`, `business_events.payload`, and `webhook_subscription_revisions.secret_ciphertext`. Changed fields SHALL still name an excluded column when it changes. Revocation events SHALL have a null record ID.
 
 #### Scenario: Invitation token hash excluded
 - **WHEN** an invitation is reissued
@@ -109,8 +107,16 @@ Stored old and new values SHALL exclude `organization_invitations.token_hash`, `
 - **WHEN** a token is revoked
 - **THEN** the event has a null record ID and its values do not contain the fingerprint
 
+#### Scenario: Webhook secret excluded
+- **WHEN** a subscription revision is created with an encrypted signing secret
+- **THEN** audit rows name that changed column but store neither ciphertext nor plaintext secret
+
+#### Scenario: Business body not duplicated into audit
+- **WHEN** a business event is inserted
+- **THEN** its audit row retains event ID, tenant, type and digest but not its payload, and payload inspection still requires its dedicated permission
+
 ### Requirement: Audit coverage verification
-The system SHALL fail a test when any base table in `public`, other than `_fluent_migrations`, lacks an enabled change trigger, or lacks a required `organization_id` and is not listed as global. The global list SHALL be `users`, `organizations`, and `revoked_access_tokens`. The `audit-verify` command SHALL run the same check, and SHALL also report any login role outside the owner role, other than a superuser, that can write to `audit.audit_events` or `_fluent_migrations`, or has `TRUNCATE` or `TRIGGER` on an application table. It SHALL exit non-zero when it finds a problem.
+The system SHALL fail a test when any base table in `public`, other than `_fluent_migrations`, lacks an enabled change trigger with the events required by Operational queue capture scope, or has a trigger on a table that scope exempts, or lacks a required `organization_id` and is not listed as global. The global list SHALL be `users`, `organizations`, and `revoked_access_tokens`. The `audit-verify` command SHALL run the same check, and SHALL also report any login role outside the owner role, other than a superuser, that can write to `audit.audit_events` or `_fluent_migrations`, or has `TRUNCATE` or `TRIGGER` on an application table. It SHALL exit non-zero when it finds a problem.
 
 #### Scenario: New table without trigger
 - **WHEN** a migration adds a table without a change trigger
@@ -131,6 +137,10 @@ The system SHALL fail a test when any base table in `public`, other than `_fluen
 #### Scenario: Migration history revoke skipped
 - **WHEN** the runtime role can still write to `_fluent_migrations`
 - **THEN** `audit-verify` exits non-zero and names the role
+
+#### Scenario: Queue trigger scope enforced
+- **WHEN** `webhook_deliveries` has a change trigger that captures updates, or `business_event_dispatches` has any change trigger
+- **THEN** the coverage test fails and names the table
 
 ### Requirement: Tenant audit events API
 `GET /audit-events` SHALL require authentication, `X-Organization-ID`, active membership, and `audit_event:read`. It SHALL list only events for that organization under list-endpoints paging rules, ordered by `createdAt` descending and then `id` ascending. Exact filters SHALL be `table`, `recordId`, `actorId`, `operation`, and `requestId`. `from` and `to` SHALL filter `createdAt` inclusively. It SHALL expose actor name only for `operator` and `system` actors and IP only for `user` actors. It SHALL NOT expose session database users.
@@ -177,3 +187,30 @@ The system SHALL fail a test when any base table in `public`, other than `_fluen
 #### Scenario: Non-administrator rejected
 - **WHEN** a user who is not a platform administrator requests platform audit events
 - **THEN** the system responds `403`
+
+### Requirement: Operational queue capture scope
+`webhook_deliveries` SHALL have a change trigger that captures inserts and deletes but not updates, because its scheduling updates are reconstructable from the append-only delivery ledger. `business_event_dispatches` SHALL have no change trigger, because it holds only a reference to an audited business event and is removed once dispatched. Both tables SHALL still require `organization_id`. Every other application table SHALL keep insert, update and delete capture. No other table SHALL be exempted without a later specification change.
+
+#### Scenario: Delivery scheduling churn not captured
+- **WHEN** a worker leases, retries and acknowledges a delivery
+- **THEN** the delivery's creation has one audit event, its scheduling updates have none, and each attempt appears in the append-only ledger
+
+#### Scenario: Delivery deletion captured
+- **WHEN** a privileged role deletes a delivery row
+- **THEN** an audit event records the deletion
+
+### Requirement: Service account attribution
+Writes made by an authenticated service account SHALL use actor type `service_account` with the account's ID as actor ID, and `created_by`, `updated_by`, and `deleted_by` SHALL record that ID. Writes applied by a person's approval of a request a service account submitted SHALL be attributed to the approving person and SHALL link the approval request, whose requester is the service account. Changes to a service account's own records SHALL be attributed to the actor who made them.
+
+#### Scenario: Direct write by an integration
+- **WHEN** a service account with `company:create` creates a company
+- **THEN** the audit event records actor type `service_account` and the account's ID, and the company's `created_by` is the account
+
+#### Scenario: Held write approved by a person
+- **WHEN** a service account's company update is held and a person's approval applies it
+- **THEN** the company event records the person as actor and links the approval request, whose requester is the service account
+
+#### Scenario: Lifecycle attributed to the administrator
+- **WHEN** a person disables a service account
+- **THEN** the event records that person as actor with actor type `user`
+

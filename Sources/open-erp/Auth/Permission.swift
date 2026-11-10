@@ -49,6 +49,11 @@ enum Permission: String, Codable, CaseIterable, Sendable {
     case webhookPayloadRead = "webhook_payload:read"
     case webhookDeliveryRead = "webhook_delivery:read"
     case webhookSecretRead = "webhook_secret:read"
+    case serviceAccountCreate = "service_account:create"
+    case serviceAccountRead = "service_account:read"
+    case serviceAccountUpdate = "service_account:update"
+    case serviceAccountDelete = "service_account:delete"
+    case serviceAccountDisable = "service_account:disable"
 
     /// Every permission shipped in this change is organization-wide.
     /// Company-scoped permissions arrive with company-level enforcement.

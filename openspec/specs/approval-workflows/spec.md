@@ -3,11 +3,9 @@
 ## Purpose
 
 Approval policies and versions, the approval catalog, matching writes to policies, approval requests and their lifecycle, approver eligibility, applying approved changes, master and operator override, and held invitations.
-
 ## Requirements
-
 ### Requirement: Approval catalog
-The system SHALL define in code which permissions can require approval and which fields each exposes. Every `create`, `update`, and `delete` permission in the catalog SHALL be gateable except `approval_override:create`. Each gateable `update` permission SHALL list every field its endpoint can change, by API name:
+The system SHALL define in code which permissions can require approval and which fields each exposes. Every `create`, `update`, and `delete` permission in the catalog SHALL be gateable except `approval_override:create`. `webhook_subscription:disable` SHALL NOT be gateable. Gateability SHALL be selected explicitly by supported mutation operations, not inferred from a permission merely lacking the `:read` suffix. Each gateable `update` permission SHALL list every field its endpoint can change, by API name:
 
 | Permission | Fields |
 |---|---|
@@ -16,6 +14,7 @@ The system SHALL define in code which permissions can require approval and which
 | `role:update` | `name`, `permissions` |
 | `group:update` | `name` |
 | `approval_policy:update` | `name`, `fields`, `companyId`, `stages` |
+| `webhook_subscription:update` | `name`, `url`, `eventTypes`, `companyIds`, `enabled`, `rotateSecret` |
 
 `GET /approval-catalog` SHALL return every gateable permission, its fields, and whether it supports company scope. Company scope SHALL be supported exactly for `company:update`, `company:delete`, `group:update`, `group:delete`, `group_member:create`, `group_member:delete`, `group_role:create`, `group_role:delete`, `group_company:create`, and `group_company:delete`.
 
@@ -26,6 +25,10 @@ The system SHALL define in code which permissions can require approval and which
 #### Scenario: Catalog requires permission
 - **WHEN** a member without `approval_policy:read` calls `GET /approval-catalog`
 - **THEN** the system responds `403 Forbidden`
+
+#### Scenario: Integration changes are gateable
+- **WHEN** an authorized member reads the approval catalog
+- **THEN** it includes subscription create/update/delete, lists all subscription update fields, declares no company scope for these permissions, and excludes emergency disable
 
 ### Requirement: Approval policies
 Members with approval policy permissions SHALL be able to create, list, view, edit, and delete approval policies in their organization. A policy SHALL have a name unique among the organization's active policies, one gateable permission, an optional list of fields, an optional company, and one or more stages. Each stage SHALL have one or more slots, and each slot SHALL name an active group in the organization and a required approval count of at least 1. A group SHALL appear at most once per stage. The system SHALL respond `400 Bad Request` when the permission is not gateable, when fields are given for a permission that is not an `update`, when a field is not listed in the catalog for that permission, when a company is given for a permission without company scope, when the company is not an active company in the organization, when a group is not an active group in the organization, or when a slot's required count exceeds its group's active members. A policy's permission SHALL NOT change after creation.
@@ -392,3 +395,38 @@ Saving a policy SHALL respond `400 Bad Request` naming the stage when active gro
 #### Scenario: Held policy no longer satisfiable
 - **WHEN** a held policy is approved after its approvers were removed
 - **THEN** the request is `failed` with its reason and no policy is created
+
+### Requirement: Webhook approval operations
+Subscription create/update/delete SHALL enter the existing ProposedChange approval workflow, preserve API outcome contracts, and recheck tenant ownership, requester authority, source-read/payload grants where required, revision preconditions and current outbound authority at application. A held operation SHALL not generate secrets, export business data or mutate the active configuration. Existing approver eligibility, requester separation, concurrent final-approval protection and attributed master/operator override rules SHALL apply. Emergency disable, automatic pause and secret disclosure SHALL never create held requests. An override SHALL remain visible as a distinct recorded action and SHALL not bypass destination safety, tenant isolation or revision preconditions.
+
+#### Scenario: Two final approvals
+- **WHEN** two approvers concurrently finish a held subscription activation
+- **THEN** exactly one configuration revision is applied
+
+#### Scenario: Activation loses authority
+- **WHEN** a held enablement loses its requester's payload/source grant before final approval
+- **THEN** it ends failed with the decision retained and the subscription remains disabled
+
+#### Scenario: Cross-tenant held reference
+- **WHEN** a proposed webhook mutation contains a subscription from another organization
+- **THEN** submission is rejected without disclosing its payload and nothing can be applied in that tenant
+
+### Requirement: Service account approval gating
+`service_account:create`, `service_account:update`, and `service_account:delete` SHALL be gateable, and the catalog SHALL list `service_account:update` with fields `name`, `description`, `ownerId`, `subject`, and `enabled`. None SHALL support company scope. `service_account:disable` SHALL NOT be gateable. A held registration SHALL re-check subject uniqueness and owner eligibility when applied, and SHALL end `failed` if either no longer holds. Service accounts SHALL be able to submit and withdraw requests and, through group membership, approve them under the same eligibility rules as people.
+
+#### Scenario: Held registration
+- **WHEN** a policy covers `service_account:create` and a member registers a service account
+- **THEN** the system responds `202` with a pending request and no account exists until it is approved
+
+#### Scenario: Re-enable held
+- **WHEN** a policy covers `service_account:update` field `enabled` and a member re-enables a disabled account
+- **THEN** the system responds `202` and the account stays disabled until approved
+
+#### Scenario: Subject taken before apply
+- **WHEN** a held registration for subject `abc@clients` is approved after another account bound `abc@clients`
+- **THEN** the request ends `failed` and no account is created
+
+#### Scenario: Service account write held
+- **WHEN** a policy covers `company:update` and a service account renames a company
+- **THEN** the system responds `202` with a request whose requester is the service account, and the service account cannot approve it
+

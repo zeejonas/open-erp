@@ -371,6 +371,57 @@ The implementation follows [Vapor JWT](https://docs.vapor.codes/security/jwt/),
 [Vapor commands](https://docs.vapor.codes/advanced/commands/), and
 [SQLKit's bound queries](https://github.com/vapor/sql-kit).
 
+## Service accounts
+
+An integration authenticates as a **service account**, not as a person. The account
+belongs to one organization. It gets permissions only through the groups it joins.
+Its writes are recorded with actor type `service_account` and the account's ID.
+
+The ERP does not issue credentials. The identity provider does, through the OAuth
+client-credentials grant. The ERP checks these tokens the same way it checks user
+tokens: the same issuer, JWKS and audience.
+
+To connect an integration:
+
+1. In the identity provider, create a machine-to-machine client and allow it to
+   request access tokens for `OIDC_AUDIENCE`.
+2. Request a token with the client-credentials grant and decode it. Its `sub` is
+   the subject to register:
+   - Auth0 uses the client ID followed by `@clients`, as in the
+     [machine-to-machine example](https://auth0.com/docs/manage-users/organizations/using-tokens).
+   - Okta uses the client ID by default.
+   - Microsoft Entra ID uses a `sub` that is unique per application; see the
+     [claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference).
+   - The token's `iss` must match `OIDC_ISSUER`. For Entra ID, that means the same
+     token version and tenant as user tokens.
+3. Call `POST /service-accounts` with a `name`, the `subject`, and optionally an
+   `ownerId`. The owner is the accountable person and defaults to you.
+4. Add the account to groups that grant only the permissions the integration needs.
+
+Rotate client secrets in the identity provider. To move an account to a new client,
+change `subject` with `PATCH /service-accounts/:id`. The old client's tokens stop
+working immediately.
+
+`POST /service-accounts/:id/disable` blocks the account on its next request, even
+with an unexpired token, and never waits for approval. Re-enabling uses `PATCH`
+with `enabled: true`, which approval policies can gate. Registering, updating and
+deleting can also require approval.
+
+Service accounts cannot use `/me`, accept invitations, or appear in `GET /users`.
+They never count toward the rule that keeps at least one organization
+administrator. `GET /me/access` returns an account's effective permissions.
+
+**Customer responsibilities.** The server does not limit what a service account can
+be granted. That includes approving requests and managing membership. Your
+organization should:
+
+- Grant each integration the smallest set of permissions it needs.
+- Keep an account's owner out of the approver groups for writes that account
+  submits. Otherwise the owner can approve the integration's changes.
+- Review accounts regularly with `GET /service-accounts`. It shows each account's
+  owner, enabled state and `lastUsedAt`, which updates at most once a day. Disable
+  or delete accounts that have gone unused or whose owner has left.
+
 ## API errors
 
 Application errors use [RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457.html)

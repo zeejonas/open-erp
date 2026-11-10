@@ -23,6 +23,7 @@ enum BusinessEventClassification {
         "business_events": "Public event evidence must not publish recursively",
         "business_event_dispatches": "Operational fan-out queue",
         "webhook_subscriptions": "Integration authority; no public event in the v1 catalog",
+        "service_accounts": "Integration identity; no public event in the v1 catalog",
         "webhook_subscription_revisions": "Integration authority evidence",
         "webhook_secret_reveals": "Secret disclosure evidence",
         "webhook_deliveries": "Internal delivery scheduling",

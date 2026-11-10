@@ -35,6 +35,13 @@ extension ProposedChange {
         case .webhookSubscriptionDelete(let id, let expected):
             let (subscription, _) = try await WebhookSubscriptionService.require(id, organizationID: organizationID, lock: true, on: db)
             try throwIfStale(subscription.currentRevisionID != expected)
+        case .serviceAccountCreate(let snapshot):
+            try await ServiceAccountChanges.validateOwner(snapshot.ownerId, organizationID: organizationID, on: db)
+            try await ServiceAccountChanges.validateSubject(snapshot.subject, on: db)
+        case .serviceAccountUpdate(let id, let before, let after):
+            try await ServiceAccountChanges.checkUpdate(id: id, before: before, after: after, organizationID: organizationID, on: db)
+        case .serviceAccountDelete(let id, _):
+            _ = try await ServiceAccountChanges.require(id, organizationID: organizationID, on: db)
         case .organizationUpdate(let id, let before, let after):
             let organization = try await requireOrganization(id, on: db)
             try throwIfStale(before.code != after.code && organization.code != before.code)
@@ -192,6 +199,13 @@ extension ProposedChange {
             subscription.deletedBy = actorID
             try await subscription.update(on: db)
             try await subscription.delete(on: db)
+            return ApprovalWriteResult(HTTPStatus.noContent)
+        case .serviceAccountCreate(let snapshot):
+            return ApprovalWriteResult(try await ServiceAccountChanges.create(snapshot, organizationID: organizationID, actorID: actorID, on: db))
+        case .serviceAccountUpdate(let id, let before, let after):
+            return ApprovalWriteResult(try await ServiceAccountChanges.update(id: id, before: before, after: after, organizationID: organizationID, actorID: actorID, on: db))
+        case .serviceAccountDelete(let id, _):
+            try await ServiceAccountChanges.delete(id: id, organizationID: organizationID, actorID: actorID, on: db)
             return ApprovalWriteResult(HTTPStatus.noContent)
         case .organizationUpdate(let id, let before, let after):
             let organization = try await requireOrganization(id, on: db)
@@ -363,7 +377,8 @@ extension ProposedChange {
                 try await groupMembership.save(on: db)
             }
             try await groupMembership.emit(.groupMemberCreated, on: db)
-            return ApprovalWriteResult(groupMembership.toGetDTO(userID: draft.userId))
+            try await membership.$user.load(on: db)
+            return ApprovalWriteResult(groupMembership.toGetDTO(userID: draft.userId, userKind: membership.user.kind))
         case .groupMemberDelete(let draft):
             let groupMembership = try await requireGroupMember(draft, organizationID: organizationID, on: db)
             try await groupMembership.softDelete(by: actorID, \.$deletedBy, on: db)

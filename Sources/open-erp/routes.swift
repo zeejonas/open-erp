@@ -28,6 +28,7 @@ func routes(_ app: Application) throws {
     try app.register(collection: CompanyController())
     try app.register(collection: UserController())
     try app.register(collection: OrganizationUserController())
+    try app.register(collection: ServiceAccountController())
     try app.register(collection: RoleController())
     try app.register(collection: GroupController())
     try app.register(collection: ApprovalPolicyController())

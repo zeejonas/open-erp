@@ -93,6 +93,9 @@ struct InvitationController: RouteCollection {
     @Sendable
     func accept(req: Request) async throws -> AcceptInvitationResponse {
         let token = try await req.verifiedAccessToken()
+        if try await User.bound(to: token.subjectID, on: req.db)?.kind == .service {
+            throw Abort(.forbidden, reason: "Service accounts cannot accept invitations")
+        }
         try AcceptInvitationDTO.validate(content: req)
         let dto = try req.content.decode(AcceptInvitationDTO.self)
 

@@ -47,11 +47,13 @@ struct MeController: RouteCollection {
 
     @Sendable
     func show(req: Request) async throws -> GetUserDTO {
-        req.user.toGetDTO()
+        try req.requirePerson()
+        return req.user.toGetDTO()
     }
 
     @Sendable
     func patch(req: Request) async throws -> GetUserDTO {
+        try req.requirePerson()
         try PatchMeDTO.validate(content: req)
         let dto = try req.content.decode(PatchMeDTO.self)
         let user = req.user

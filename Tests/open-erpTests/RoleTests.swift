@@ -63,6 +63,12 @@ extension OpenERPTests {
             ProtectedRoute(method: .GET, path: "webhook-event-types", permission: .webhookEventRead),
             ProtectedRoute(method: .GET, path: "webhook-deliveries", permission: .webhookDeliveryRead),
             ProtectedRoute(method: .GET, path: "webhook-events/\(missingID)/payload", permission: .webhookPayloadRead),
+            ProtectedRoute(method: .POST, path: "service-accounts", permission: .serviceAccountCreate),
+            ProtectedRoute(method: .GET, path: "service-accounts", permission: .serviceAccountRead),
+            ProtectedRoute(method: .GET, path: "service-accounts/\(missingID)", permission: .serviceAccountRead),
+            ProtectedRoute(method: .PATCH, path: "service-accounts/\(missingID)", permission: .serviceAccountUpdate),
+            ProtectedRoute(method: .DELETE, path: "service-accounts/\(missingID)", permission: .serviceAccountDelete),
+            ProtectedRoute(method: .POST, path: "service-accounts/\(missingID)/disable", permission: .serviceAccountDisable),
         ]
 
         try await withApp { app in

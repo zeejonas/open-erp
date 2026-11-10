@@ -231,13 +231,14 @@ struct GroupController: RouteCollection {
         let group = try await findGroup(req: req)
         let members = try await GroupMember.query(on: req.db)
             .join(OrganizationUser.self, on: \GroupMember.$organizationUser.$id == \OrganizationUser.$id)
+            .join(User.self, on: \OrganizationUser.$user.$id == \User.$id)
             .filter(\.$group.$id == group.requireID())
             .filter(OrganizationUser.self, \.$deletedAt == nil)
             .newestFirst(\.$createdAt)
             .paginate(page)
         return try members.map { member in
             let membership = try member.joined(OrganizationUser.self)
-            return member.toGetDTO(userID: membership.$user.id)
+            return member.toGetDTO(userID: membership.$user.id, userKind: try member.joined(User.self).kind)
         }
     }
 

@@ -27,6 +27,10 @@ struct OrganizationUserController: RouteCollection {
         guard let userID = req.parameters.get("userID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid user ID")
         }
+        // A service account's membership ends only by deleting the service account.
+        if try await User.find(userID, on: req.db)?.kind == .service {
+            throw Abort(.notFound)
+        }
         return try await req.approvals.submit(.organizationUserDelete(userID: userID))
     }
 }

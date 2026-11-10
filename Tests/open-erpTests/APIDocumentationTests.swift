@@ -26,7 +26,7 @@ struct APIDocumentationTests {
                 #expect(paths["/health"] == nil)
                 #expect(paths["/hello"] == nil)
                 #expect(paths["/"] == nil)
-                #expect(paths.values.reduce(0) { $0 + $1.count } == 76)
+                #expect(paths.values.reduce(0) { $0 + $1.count } == 82)
 
                 // Catch forgotten annotations and silent schema-generation failures on any route.
                 for route in app.routes.all where !["/health", "/docs", "/openapi.json"].contains("/" + route.path.map(\.description).joined(separator: "/")) {
@@ -48,7 +48,7 @@ struct APIDocumentationTests {
                         let schema = try #require(content["application/problem+json"]?["schema"] as? [String: Any])
                         #expect(schema["$ref"] as? String == "#/components/schemas/Problem")
                     }
-                    if route.method != .DELETE && path != "/auth/logout" && path != "/webhook-subscriptions/{subscriptionID}/disable" {
+                    if route.method != .DELETE && path != "/auth/logout" && !path.hasSuffix("/disable") {
                         #expect(responses["200"]?["content"] != nil, "Missing response schema: \(path)")
                     }
                     if let pending = responses["202"] {

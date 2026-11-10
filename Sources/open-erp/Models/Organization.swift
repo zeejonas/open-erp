@@ -124,6 +124,11 @@ final class Company: Model, @unchecked Sendable {
     }
 }
 
+enum UserKind: String, Codable, CaseIterable, Sendable {
+    case person
+    case service
+}
+
 final class User: Model, @unchecked Sendable {
     static let schema = "users"
 
@@ -144,6 +149,9 @@ final class User: Model, @unchecked Sendable {
 
     @Field(key: "is_platform_admin")
     var isPlatformAdmin: Bool
+
+    @Field(key: "kind")
+    var kind: UserKind
 
     @Siblings(through: OrganizationUser.self, from: \.$user, to: \.$organization)
     var organizations: [Organization]
@@ -167,6 +175,7 @@ final class User: Model, @unchecked Sendable {
         email: String,
         authSubject: String? = nil,
         isPlatformAdmin: Bool = false,
+        kind: UserKind = .person,
         createdBy: User? = nil,
         updatedBy: User? = nil,
         deletedBy: User? = nil
@@ -176,6 +185,7 @@ final class User: Model, @unchecked Sendable {
         self.email = email
         self.authSubject = authSubject
         self.isPlatformAdmin = isPlatformAdmin
+        self.kind = kind
         self.$createdBy.id = createdBy?.id
         self.$updatedBy.id = updatedBy?.id
         self.$deletedBy.id = deletedBy?.id
