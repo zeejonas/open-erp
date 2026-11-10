@@ -130,6 +130,60 @@ before go-live. Audit attribution uses a transaction-local setting, and
 PostgreSQL session settings can affect proxy connection reuse.
 [Amazon RDS Proxy pinning documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html)
 
+## Encryption
+
+### In transit
+
+| Hop | Protection | Controlled by |
+| --- | --- | --- |
+| Client → load balancer | TLS terminated at the load balancer. Every API response carries `Strict-Transport-Security`, so browsers refuse to downgrade later requests. | Load balancer listener certificate; `HSTS_MAX_AGE_SECONDS` |
+| Load balancer → API | Plain HTTP inside the private network by default. Set `HTTP_TLS_CERT_FILE` and `HTTP_TLS_KEY_FILE` to serve only TLS on the same port, then switch the load balancer's target protocol to HTTPS. | `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE` |
+| API and worker → PostgreSQL | TLS with certificate chain and hostname verification. There is no plaintext fallback. | `DATABASE_TLS_MODE`, `DATABASE_CA_FILE` |
+| API → identity provider (JWKS, userinfo) | HTTPS with certificate chain and hostname verification. Outside testing, startup fails if either URL is not `https`. | `OIDC_JWKS_URL`, `OIDC_USERINFO_URL`, `OIDC_ALLOW_INSECURE_HTTP` |
+| Worker → webhook receivers | HTTPS only, with certificate verification against the original hostname. | Destination URL validation |
+
+| Variable | Purpose |
+| --- | --- |
+| `HSTS_MAX_AGE_SECONDS` | `max-age` for `Strict-Transport-Security`, default `31536000` (one year) outside testing. `0` turns the header off. The header omits `includeSubDomains` and `preload`, because the API can't speak for sibling hosts. |
+| `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE` | PEM certificate chain and private key for in-process HTTPS. Set both or neither. Only `serve` reads them. |
+| `OIDC_ALLOW_INSECURE_HTTP` | `true` allows `http` identity provider URLs and logs a warning naming them. Use it only for a local stub or a provider behind a TLS-terminating proxy on the same host. Default `false`. |
+
+Browsers ignore `Strict-Transport-Security` received over plain HTTP (RFC 6797 §8.1),
+so the API sends it whatever the request scheme. Browsers remember it for the full
+`max-age`. Lower `HSTS_MAX_AGE_SECONDS` and wait out the old value before ever
+serving the API host over plain HTTP.
+
+The load balancer → API hop can use a self-signed certificate, because load balancers
+such as AWS ALB don't validate target certificates. The server loads certificates at
+startup, so rotate them with a rolling restart.
+[Vapor server TLS documentation](https://docs.vapor.codes/advanced/server/)
+
+### At rest
+
+| Storage | Protection |
+| --- | --- |
+| Database storage | Encrypted by the storage layer with a KMS key. Required in production; see below. |
+| Snapshots, automated backups, read replicas | Inherit the source instance's encryption. |
+| Webhook signing secrets | Also encrypted by the application with AES-GCM under `WEBHOOK_KEY_ENCRYPTION_KEY`. |
+| Logs | The redacting log handler keeps tokens and credentials out. The log store's own encryption is a deployment control. |
+
+Production database storage must be encrypted at rest with a KMS key. PostgreSQL can't
+report storage encryption, so check it from the cloud API. On Amazon RDS:
+
+```bash
+aws rds describe-db-instances --db-instance-identifier YOUR_INSTANCE --query 'DBInstances[].[StorageEncrypted,KmsKeyId]'
+```
+
+RDS can't turn on encryption for an existing instance in place. To encrypt one, take a
+snapshot, copy it with a KMS key, restore the encrypted copy to a new instance, and cut
+over to its endpoint.
+[Amazon RDS encryption documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html)
+
+Load `WEBHOOK_KEY_ENCRYPTION_KEY` from a secret manager, never from the image or the
+repository. Anyone with both a database copy and this key can decrypt webhook signing secrets.
+
+The local Compose database has neither TLS nor encryption at rest. Never put real data in it.
+
 ## API documentation
 
 With the server running, open [Swagger UI](http://localhost:8080/docs).
@@ -168,7 +222,7 @@ See [VaporToOpenAPI](https://github.com/dankinsoid/VaporToOpenAPI),
 
 Any OIDC provider can supply JWT access tokens. Configure the exact `OIDC_ISSUER`
 (including a trailing slash when present), `OIDC_AUDIENCE`, trusted `OIDC_JWKS_URL`,
-and `OIDC_USERINFO_URL`. The ERP verifies the signature with the configured JWKS,
+and `OIDC_USERINFO_URL`. Both URLs must use `https` outside testing; see [Encryption](#encryption). The ERP verifies the signature with the configured JWKS,
 requires matching `iss`, an `aud` containing the configured audience, and a future
 `exp`. Send an **access token**, never an ID token, refresh token, or provider
 session cookie. No provider-specific `jti`, roles, or permissions claim is required;

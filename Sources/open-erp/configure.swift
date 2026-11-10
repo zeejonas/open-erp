@@ -3,31 +3,39 @@ import FluentPostgresDriver
 import Vapor
 
 /// configures your application
-func configure(_ app: Application, serving: Bool = true) async throws {
+func configure(
+    _ app: Application,
+    serving: Bool = true,
+    lookup: (String) -> String? = Environment.get
+) async throws {
     // API setup resets middleware, so it runs before services.
-    try configureAPI(app)
-    try configureServices(app)
+    try configureAPI(app, lookup: lookup)
+    try configureServices(app, lookup: lookup)
     if serving {
-        app.storage[TrustedProxyCount.self] = try TrustedProxyCount.parse(Environment.get("TRUSTED_PROXY_COUNT"))
+        app.storage[TrustedProxyCount.self] = try TrustedProxyCount.parse(lookup("TRUSTED_PROXY_COUNT"))
+        try configureServerTLS(app, lookup: lookup)
         try await checkServingDatabaseRole(on: app.db, environment: app.environment, logger: app.logger)
         _ = try WebhookEncryptionKey.load() // Fail at startup rather than on first secret use.
-        try await configureAuthentication(app)
+        try await configureAuthentication(app, lookup: lookup)
     }
 }
 
 /// Registers the HTTP contract without runtime services or credentials.
-func configureAPI(_ app: Application) throws {
+func configureAPI(_ app: Application, lookup: (String) -> String? = Environment.get) throws {
     configureProblemMiddleware(app)
-    // Wrap error handling so generated failures receive the same cache policy.
+    // Wrap error handling so generated failures receive the same cache and transport policy.
     app.middleware.use(NoStoreMiddleware(), at: .beginning)
+    if let hsts = try HSTSMiddleware.configured(testing: app.environment == .testing, lookup: lookup) {
+        app.middleware.use(hsts, at: .beginning)
+    }
     try routes(app)
     app.asyncCommands.use(ExportOpenAPICommand(), as: "export-openapi")
 }
 
 /// Configures dependencies required by serving and operational commands.
-func configureServices(_ app: Application) throws {
+func configureServices(_ app: Application, lookup: (String) -> String? = Environment.get) throws {
     let testing = app.environment == .testing
-    let database = try DatabaseSettings(testing: testing, lookup: Environment.get)
+    let database = try DatabaseSettings(testing: testing, lookup: lookup)
     app.databases.use(.postgres(
         configuration: try database.postgresConfiguration(),
         maxConnectionsPerEventLoop: database.maxConnectionsPerEventLoop
