@@ -54,6 +54,7 @@ func configureServices(_ app: Application, lookup: (String) -> String? = Environ
     app.migrations.add(CreateOrganizationRestoration())
     app.migrations.add(CreateCompany())
     app.migrations.add(CreateOrganizationUser())
+    app.migrations.add(CreateServiceAccount())
     app.migrations.add(CreateCompanyUser())
     app.migrations.add(CreateRole())
     app.migrations.add(CreateRolePermission())

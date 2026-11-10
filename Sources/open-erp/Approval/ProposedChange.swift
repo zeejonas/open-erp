@@ -30,11 +30,18 @@ enum ProposedChange: Codable, Equatable, Sendable {
     case webhookSubscriptionUpdate(id: UUID, expectedRevisionID: UUID, before: WebhookConfiguration, after: WebhookConfiguration, rotateSecret: Bool)
     case webhookSubscriptionDelete(id: UUID, expectedRevisionID: UUID)
 
+    case serviceAccountCreate(ServiceAccountSnapshot)
+    case serviceAccountUpdate(id: UUID, before: ServiceAccountSnapshot, after: ServiceAccountSnapshot)
+    case serviceAccountDelete(id: UUID, before: ServiceAccountSnapshot)
+
     var permission: Permission {
         switch self {
         case .webhookSubscriptionCreate: .webhookSubscriptionCreate
         case .webhookSubscriptionUpdate: .webhookSubscriptionUpdate
         case .webhookSubscriptionDelete: .webhookSubscriptionDelete
+        case .serviceAccountCreate: .serviceAccountCreate
+        case .serviceAccountUpdate: .serviceAccountUpdate
+        case .serviceAccountDelete: .serviceAccountDelete
         case .organizationUpdate: .organizationUpdate
         case .organizationDelete: .organizationDelete
         case .companyCreate: .companyCreate
@@ -73,6 +80,8 @@ enum ProposedChange: Codable, Equatable, Sendable {
         switch self {
         case .webhookSubscriptionUpdate(let id, _, _, _, _), .webhookSubscriptionDelete(let id, _): id
         case .webhookSubscriptionCreate: nil
+        case .serviceAccountUpdate(let id, _, _), .serviceAccountDelete(let id, _): id
+        case .serviceAccountCreate: nil
         case .organizationUpdate(let id, _, _), .organizationDelete(let id, _): id
         case .companyUpdate(let id, _, _), .companyDelete(let id, _): id
         case .organizationUserDelete(let userID): userID
@@ -93,6 +102,8 @@ enum ProposedChange: Codable, Equatable, Sendable {
         switch self {
         case .webhookSubscriptionUpdate(_, _, let before, let after, let rotate):
             return after.changedFields(from: before).union(rotate ? ["rotateSecret"] : [])
+        case .serviceAccountUpdate(_, let before, let after):
+            return after.changedFields(from: before)
         case .organizationUpdate(_, let before, let after), .companyUpdate(_, let before, let after):
             return differing(["code": before.code != after.code, "name": before.name != after.name])
         case .roleUpdate(_, let before, let after):
@@ -164,6 +175,13 @@ extension ProposedChange {
             try container.encode(rotate, forKey: .rotateSecret)
         case .webhookSubscriptionDelete(_, let expected):
             try container.encode(expected, forKey: .expectedRevisionId)
+        case .serviceAccountCreate(let after):
+            try container.encode(after, forKey: .after)
+        case .serviceAccountUpdate(_, let before, let after):
+            try container.encode(before, forKey: .before)
+            try container.encode(after, forKey: .after)
+        case .serviceAccountDelete(_, let before):
+            try container.encode(before, forKey: .before)
         case .organizationUpdate(_, let before, let after), .companyUpdate(_, let before, let after):
             try container.encode(before, forKey: .before)
             try container.encode(after, forKey: .after)
@@ -229,6 +247,19 @@ extension ProposedChange {
         case .webhookSubscriptionDelete:
             self = .webhookSubscriptionDelete(id: try container.decode(UUID.self, forKey: .targetId),
                 expectedRevisionID: try container.decode(UUID.self, forKey: .expectedRevisionId))
+        case .serviceAccountCreate:
+            self = .serviceAccountCreate(try container.decode(ServiceAccountSnapshot.self, forKey: .after))
+        case .serviceAccountUpdate:
+            self = .serviceAccountUpdate(
+                id: try container.decode(UUID.self, forKey: .targetId),
+                before: try container.decode(ServiceAccountSnapshot.self, forKey: .before),
+                after: try container.decode(ServiceAccountSnapshot.self, forKey: .after)
+            )
+        case .serviceAccountDelete:
+            self = .serviceAccountDelete(
+                id: try container.decode(UUID.self, forKey: .targetId),
+                before: try container.decode(ServiceAccountSnapshot.self, forKey: .before)
+            )
         case .organizationUpdate:
             self = .organizationUpdate(
                 id: try container.decode(UUID.self, forKey: .targetId),

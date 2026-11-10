@@ -4,7 +4,7 @@ import SQLKit
 import Vapor
 
 enum AuditActorType: String, Codable, CaseIterable, Sendable {
-    case user, platformAdmin = "platform_admin", `operator`, system, database
+    case user, serviceAccount = "service_account", platformAdmin = "platform_admin", `operator`, system, database
 }
 
 struct AuditContext: Codable, Sendable {
@@ -37,10 +37,11 @@ extension Request {
         user: User? = nil,
         verifiedSubject: String? = nil
     ) throws -> AuditContext {
-        let actorID = try (user ?? authenticatedUser)?.requireID()
+        let actor = user ?? authenticatedUser
+        let actorID = try actor?.requireID()
         guard actorID != nil || verifiedSubject != nil else { throw Abort(.internalServerError) }
         return AuditContext(
-            actorType: actorType,
+            actorType: actorType == .user && actor?.kind == .service ? .serviceAccount : actorType,
             actorID: actorID,
             actorName: actorID == nil ? verifiedSubject : nil,
             ipAddress: auditClientIP,

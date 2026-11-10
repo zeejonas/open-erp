@@ -33,6 +33,7 @@ struct UserController: RouteCollection {
         try req.require(.organizationUserRead)
         let (filters, page) = try req.listParameters(UserListFilters.self)
         var users = User.query(on: req.db, organizationID: req.organizationID)
+            .filter(\.$kind == .person)
             .filter(\.$firstName, contains: filters.firstName)
             .filter(\.$lastName, contains: filters.lastName)
             .filter(\.$email, contains: filters.email)
@@ -63,6 +64,7 @@ struct UserController: RouteCollection {
         }
         guard let user = try await User.query(on: req.db, organizationID: req.organizationID)
             .filter(\.$id == userID)
+            .filter(\.$kind == .person)
             .first()
         else {
             throw Abort(.notFound)

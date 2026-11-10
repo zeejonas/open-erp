@@ -38,6 +38,13 @@ extension Request {
         }
     }
 
+    /// Profiles and invitations belong to people; service accounts are managed through `/service-accounts`.
+    func requirePerson() throws {
+        guard user.kind == .person else {
+            throw Abort(.forbidden, reason: "Service accounts cannot use this route")
+        }
+    }
+
     func userID() throws -> UUID {
         try user.requireID()
     }

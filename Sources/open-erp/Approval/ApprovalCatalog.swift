@@ -46,6 +46,7 @@ enum ApprovalCatalog {
         .groupUpdate: ["name"],
         .approvalPolicyUpdate: ["name", "fields", "companyId", "stages"],
         .webhookSubscriptionUpdate: ["name", "url", "eventTypes", "companyIds", "enabled", "rotateSecret"],
+        .serviceAccountUpdate: ["name", "description", "ownerId", "subject", "enabled"],
     ]
 
     static func isGateable(_ permission: Permission) -> Bool {
@@ -55,7 +56,8 @@ enum ApprovalCatalog {
              .roleCreate, .roleUpdate, .roleDelete, .groupCreate, .groupUpdate, .groupDelete,
              .groupMemberCreate, .groupMemberDelete, .groupRoleCreate, .groupRoleDelete,
              .groupCompanyCreate, .groupCompanyDelete, .approvalPolicyCreate, .approvalPolicyUpdate,
-             .approvalPolicyDelete, .webhookSubscriptionCreate, .webhookSubscriptionUpdate, .webhookSubscriptionDelete:
+             .approvalPolicyDelete, .webhookSubscriptionCreate, .webhookSubscriptionUpdate, .webhookSubscriptionDelete,
+             .serviceAccountCreate, .serviceAccountUpdate, .serviceAccountDelete:
             true
         default: false
         }

@@ -46,15 +46,19 @@ func createUser(
     lastName: String = "Lovelace",
     email: String,
     subject: String? = nil,
-    isPlatformAdmin: Bool = false
+    isPlatformAdmin: Bool = false,
+    kind: UserKind = .person,
+    id: UUID? = nil
 ) async throws -> User {
     let user = User(
         firstName: firstName,
         lastName: lastName,
         email: email,
         authSubject: subject,
-        isPlatformAdmin: isPlatformAdmin
+        isPlatformAdmin: isPlatformAdmin,
+        kind: kind
     )
+    user.id = id
     try await user.save(on: db)
     return user
 }
@@ -68,7 +72,9 @@ func createMember(
     permissions: [Permission],
     firstName: String = "Ada",
     lastName: String = "Lovelace",
-    isPlatformAdmin: Bool = false
+    isPlatformAdmin: Bool = false,
+    kind: UserKind = .person,
+    id: UUID? = nil
 ) async throws -> User {
     let user = try await createUser(
         on: db,
@@ -76,7 +82,9 @@ func createMember(
         lastName: lastName,
         email: email,
         subject: subject,
-        isPlatformAdmin: isPlatformAdmin
+        isPlatformAdmin: isPlatformAdmin,
+        kind: kind,
+        id: id
     )
     let membership = OrganizationUser(
         organizationID: organizationID,

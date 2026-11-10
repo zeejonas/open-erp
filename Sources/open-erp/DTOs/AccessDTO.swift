@@ -149,6 +149,7 @@ struct AddGroupMemberDTO: Content {
 struct GetGroupMemberDTO: Content {
     var id: UUID?
     var userId: UUID
+    var userKind: UserKind
     var organizationUserId: UUID
     var createdById: UUID?
     var createdAt: Date?

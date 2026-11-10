@@ -5,6 +5,8 @@ struct AccessSnapshot {
     var groupsByMember: [UUID: Set<UUID>]
     var rolesByGroup: [UUID: Set<UUID>]
     var permissionsByRole: [UUID: Set<Permission>]
+    /// Service accounts hold permissions like members but never count as administrators.
+    var serviceAccounts: Set<UUID> = []
 
     static func load(organizationID: UUID, on db: any Database) async throws -> Self {
         let members = try await OrganizationUser.query(on: db, organizationID: organizationID).all()
@@ -35,6 +37,7 @@ struct AccessSnapshot {
         for link in attachments {
             snapshot.rolesByGroup[link.$group.id, default: []].insert(link.$role.id)
         }
+        snapshot.serviceAccounts = Set(try await ServiceAccount.query(on: db, organizationID: organizationID).all().map { try $0.requireID() })
         let grants = try await RolePermission.query(on: db).filter(\.$role.$id ~~ roleIDs).all()
         for grant in grants {
             if let permission = Permission(rawValue: grant.permission), permission.level == .organization {
@@ -60,7 +63,7 @@ struct AccessSnapshot {
 
     var administrators: Set<UUID> {
         let required = Set(Permission.allCases.filter { $0.level == .organization })
-        return Set(groupsByMember.keys.filter { permissions(for: $0).isSuperset(of: required) })
+        return Set(groupsByMember.keys.filter { !serviceAccounts.contains($0) && permissions(for: $0).isSuperset(of: required) })
     }
 
     mutating func removeMember(_ memberID: UUID) {

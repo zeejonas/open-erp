@@ -17,9 +17,14 @@ struct CreateUser: AsyncMigration {
             .field("deleted_at", .datetime)
             .field("auth_subject", .string)
             .field("is_platform_admin", .bool, .required, .sql(.default(false)))
+            .field("kind", .string, .required, .sql(.default("person")))
             .unique(on: "email")
             .unique(on: "auth_subject")
             .create()
+        try await database.requireSQL().raw("""
+            ALTER TABLE users ADD CHECK (kind IN ('person', 'service')),
+                ADD CHECK (kind = 'person' OR NOT is_platform_admin)
+            """).run()
         try await database.createChangeTrigger(on: "users", redact: ["auth_subject"])
     }
 
